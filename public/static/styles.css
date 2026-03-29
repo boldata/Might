@@ -95,9 +95,9 @@ body::before {
 
 /* ════════════════════════════════════════════════════════════════ SCROLLBAR */
 ::-webkit-scrollbar       { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: rgba(240,180,150,0.12); border-radius: 4px; }
-::-webkit-scrollbar-thumb { background: rgba(232,102,58,0.32); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(232,102,58,0.58); }
+::-webkit-scrollbar-track { background: rgba(180,175,168,0.15); border-radius: 4px; }
+::-webkit-scrollbar-thumb { background: rgba(150,140,130,0.40); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(150,140,130,0.65); }
 
 /* ════════════════════════════════════════════════════════════════ ANIMATIONS */
 .fade-in {
@@ -314,17 +314,15 @@ tr:hover td {
 }
 
 /* ════════════════════════════════════════════════════════════════ PREMIUM CARD HIGHLIGHT */
-/* Subtle inner-glow top line on glass panels */
 .glass::before {
   content: '';
   position: absolute;
   top: 0; left: 12px; right: 12px;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255,240,225,0.85), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.80), transparent);
   border-radius: 1px;
   pointer-events: none;
 }
-/* Only for elements that have position:relative */
 .glass { position: relative; }
 
 /* ════════════════════════════════════════════════════════════════ RESPONSIVE */

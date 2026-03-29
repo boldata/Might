@@ -90,8 +90,8 @@ const getGreeting = (name) => {
 
 // ─── Inline Styles (beige · pink · orange palette) ───────────────────────────
 // Glass surface
-const glass = `background:rgba(253,240,228,0.42);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);border:1px solid rgba(255,200,175,0.50);box-shadow:0 8px 32px rgba(180,80,60,0.14),inset 0 1px 0 rgba(255,255,255,0.55);`;
-const glassHeavy = `background:rgba(253,240,228,0.72);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);border:1px solid rgba(255,200,175,0.50);box-shadow:0 20px 60px rgba(180,80,60,0.20),inset 0 1px 0 rgba(255,255,255,0.55);`;
+const glass = `background:rgba(255,255,255,0.52);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border:1px solid rgba(200,195,188,0.50);box-shadow:0 6px 28px rgba(100,90,80,0.12),inset 0 1px 0 rgba(255,255,255,0.70);`;
+const glassHeavy = `background:rgba(255,255,255,0.78);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);border:1px solid rgba(200,195,188,0.55);box-shadow:0 16px 50px rgba(100,90,80,0.18),inset 0 1px 0 rgba(255,255,255,0.80);`;
 
 // Buttons
 const btnStyle = (v = 'primary') => {
@@ -117,8 +117,10 @@ const tableStyle = `width:100%;border-collapse:collapse;`;
 const thStyle    = `text-align:left;padding:11px 14px;font-size:10px;color:rgba(90,45,25,0.65);letter-spacing:0.09em;text-transform:uppercase;border-bottom:1px solid rgba(220,160,130,0.35);background:rgba(255,200,175,0.22);font-weight:700;`;
 const tdStyle    = `padding:12px 14px;font-size:13px;color:#2C1810;border-bottom:1px solid rgba(220,160,130,0.18);vertical-align:middle;`;
 
-// Background gradient (beige → pink → orange)
-const appBg = `background:linear-gradient(135deg,#F5C4A8 0%,#F0A8B8 30%,#F4B090 55%,#EDA090 75%,#F5C4A0 100%);`;
+// Background — warm greige/taupe (matches reference image)
+const appBg = `background:#D2CDC4;`;
+// Nav background for greige theme
+const navBg = `background:rgba(210,205,196,0.82);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);border-bottom:1px solid rgba(180,170,158,0.50);`;
 
 // ─── Router / Renderer ────────────────────────────────────────────────────────
 function render() {
@@ -181,15 +183,10 @@ function renderAuthPage() {
   const m = STATE.authMode;
   return `
 <div style="${appBg}min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;position:relative;">
-  <!-- Mesh blobs -->
-  <div style="position:fixed;inset:0;pointer-events:none;z-index:0;
-    background:radial-gradient(ellipse 60% 50% at 15% 20%,rgba(255,170,130,0.35) 0%,transparent 70%),
-               radial-gradient(ellipse 50% 60% at 80% 15%,rgba(240,140,170,0.30) 0%,transparent 70%),
-               radial-gradient(ellipse 70% 45% at 50% 85%,rgba(245,180,120,0.28) 0%,transparent 70%);"></div>
   <!-- Logo top-center -->
   <div style="position:absolute;top:28px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:10px;z-index:2;">
     <div style="width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,#E8663A,#D95F7A);display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;font-weight:900;box-shadow:0 4px 16px rgba(232,102,58,0.4);">▲</div>
-    <span style="font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.5px;text-shadow:0 2px 10px rgba(100,30,20,0.3);">SignalStack</span>
+    <span style="font-size:22px;font-weight:800;color:#0F1A20;letter-spacing:-0.5px;">SignalStack</span>
   </div>
   <!-- Auth card -->
   <div style="${glassHeavy}border-radius:24px;padding:32px;width:100%;max-width:440px;margin-top:60px;z-index:2;" class="fade-in">
@@ -321,15 +318,9 @@ function renderSubscriberApp() {
 
   return `
 <div style="${appBg}min-height:100vh;color:#2C1810;font-family:'Inter','Georgia',sans-serif;" id="ss-app">
-  <!-- Mesh blobs (fixed) -->
-  <div style="position:fixed;inset:0;pointer-events:none;z-index:0;
-    background:radial-gradient(ellipse 60% 50% at 15% 20%,rgba(255,170,130,0.35) 0%,transparent 70%),
-               radial-gradient(ellipse 50% 60% at 80% 15%,rgba(240,140,170,0.30) 0%,transparent 70%),
-               radial-gradient(ellipse 70% 45% at 50% 85%,rgba(245,180,120,0.28) 0%,transparent 70%),
-               radial-gradient(ellipse 40% 55% at 90% 75%,rgba(255,150,140,0.22) 0%,transparent 70%);"></div>
 
   <!-- NAV -->
-  <nav style="background:rgba(250,228,210,0.68);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);border-bottom:1px solid rgba(235,170,140,0.40);padding:0 28px;display:flex;align-items:center;justify-content:space-between;height:66px;position:sticky;top:0;z-index:100;box-shadow:0 2px 20px rgba(180,80,60,0.14);">
+  <nav style="${navBg}padding:0 28px;display:flex;align-items:center;justify-content:space-between;height:66px;position:sticky;top:0;z-index:100;box-shadow:0 2px 16px rgba(120,110,98,0.18);">
     <!-- Logo -->
     <div style="display:flex;align-items:center;gap:9px;flex-shrink:0;">
       <div style="width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#E8663A,#D95F7A);display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:900;box-shadow:0 3px 12px rgba(232,102,58,0.4);">▲</div>
@@ -475,7 +466,7 @@ function renderSubscriberDashboard() {
     <!-- Open Positions -->
     <div style="${cardStyle}">
       <h3 style="font-size:15px;font-weight:700;color:#2C1810;margin-bottom:16px;display:flex;align-items:center;gap:7px;">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#1A6FAD;box-shadow:0 0 0 3px rgba(26,111,173,0.18);"></span>Open Positions
+        <span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:#006E67;flex-shrink:0;"></span>Open Alerts
       </h3>
       ${locked ? `
       <div style="text-align:center;padding:32px 0;">
@@ -524,28 +515,34 @@ function renderSubscriberDashboard() {
 
 function renderOpenPositionCard(a) {
   const days = daysToClose(a.buyDate, null);
+  // Tier badge: clean greige pill
+  const tierBadge = `display:inline-flex;align-items:center;padding:3px 11px;border-radius:50px;font-size:10px;font-weight:600;background:#ECEAE6;color:#555050;border:1px solid rgba(0,0,0,0.10);letter-spacing:0.06em;text-transform:uppercase;`;
   return `
-<div onclick="openAlertModal(${a.id})" class="pos-card" style="cursor:pointer;margin-bottom:12px;background:rgba(253,235,220,0.50);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(232,102,58,0.28);border-radius:16px;padding:14px;box-shadow:0 3px 16px rgba(180,80,60,0.12);">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-    <div style="display:flex;align-items:center;gap:8px;">
-      <span style="font-weight:800;font-size:16px;color:#2C1810;letter-spacing:-0.3px;">${a.ticker}</span>
-      <span style="${a.tier==='elite'?badgeStyle(TIERS.elite.color,'rgba(200,140,160,0.45)'):badgeStyle(TIERS.trader.color,'rgba(255,210,185,0.65)')}font-size:9px;">${TIERS[a.tier]?.label||a.tier}</span>
+<div onclick="openAlertModal(${a.id})" class="pos-card" style="cursor:pointer;margin-bottom:28px;background:#E8E5DF;border-radius:20px;padding:18px 16px;border:1px solid rgba(200,195,188,0.55);box-shadow:0 3px 14px rgba(100,90,80,0.10);">
+  <!-- Top row: ticker + badge + days -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+    <div style="display:flex;align-items:center;gap:9px;">
+      <span style="font-weight:900;font-size:23px;color:#0F283C;letter-spacing:-0.5px;">${a.ticker}</span>
+      <span style="${tierBadge}">${TIERS[a.tier]?.label||a.tier}</span>
     </div>
-    <span style="font-size:10px;color:rgba(90,45,25,0.55);font-weight:500;">${days}d open · ${fmtDate(a.buyDate)}</span>
+    <span style="font-size:12px;color:#8A8278;font-weight:500;">${days}d&nbsp;·&nbsp;${fmtDate(a.buyDate)}</span>
   </div>
-  <!-- Entry / Target / Stop Loss only -->
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;">
-    <div style="background:linear-gradient(135deg,#E8663A 0%,#C9481E 100%);border-radius:12px;padding:10px 6px;text-align:center;box-shadow:0 2px 10px rgba(232,102,58,0.35);">
-      <div style="font-size:8px;color:rgba(255,255,255,0.80);font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:3px;">Entry</div>
-      <div style="font-size:16px;font-weight:800;color:#fff;letter-spacing:-0.5px;">$${a.entry}</div>
+  <!-- Three pill buttons -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px;">
+    <!-- ENTRY: solid deep teal -->
+    <div style="background:#006E67;border-radius:50px;padding:13px 6px;text-align:center;">
+      <div style="font-size:10px;color:rgba(255,255,255,0.72);font-weight:600;text-transform:uppercase;letter-spacing:0.10em;margin-bottom:5px;">Entry</div>
+      <div style="font-size:20px;font-weight:800;color:#fff;letter-spacing:-0.5px;">$${a.entry}</div>
     </div>
-    <div style="background:rgba(26,122,80,0.12);backdrop-filter:blur(6px);border:1px solid rgba(26,122,80,0.28);border-radius:12px;padding:10px 6px;text-align:center;">
-      <div style="font-size:8px;color:#1A7A50;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:3px;">Target</div>
-      <div style="font-size:16px;font-weight:800;color:#1A7A50;letter-spacing:-0.5px;">$${a.t1}</div>
+    <!-- TARGET: light mint -->
+    <div style="background:#C2E8E0;border-radius:50px;padding:13px 6px;text-align:center;">
+      <div style="font-size:10px;color:#007A72;font-weight:600;text-transform:uppercase;letter-spacing:0.10em;margin-bottom:5px;">Target</div>
+      <div style="font-size:20px;font-weight:800;color:#005E58;letter-spacing:-0.5px;">$${a.t1}</div>
     </div>
-    <div style="background:rgba(192,48,42,0.10);backdrop-filter:blur(6px);border:1px solid rgba(192,48,42,0.25);border-radius:12px;padding:10px 6px;text-align:center;">
-      <div style="font-size:8px;color:#C0302A;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:3px;">Stop</div>
-      <div style="font-size:16px;font-weight:800;color:#C0302A;letter-spacing:-0.5px;">$${a.sl}</div>
+    <!-- STOP: soft blush pink -->
+    <div style="background:#F8D2CD;border-radius:50px;padding:13px 6px;text-align:center;">
+      <div style="font-size:10px;color:#9B3830;font-weight:600;text-transform:uppercase;letter-spacing:0.10em;margin-bottom:5px;">Stop</div>
+      <div style="font-size:20px;font-weight:800;color:#9B3830;letter-spacing:-0.5px;">$${a.sl}</div>
     </div>
   </div>
 </div>`;
@@ -1043,12 +1040,7 @@ function renderAdminApp() {
 
   return `
 <div style="${appBg}min-height:100vh;color:#2C1810;font-family:'Inter','Georgia',sans-serif;">
-  <!-- Mesh blobs -->
-  <div style="position:fixed;inset:0;pointer-events:none;z-index:0;
-    background:radial-gradient(ellipse 60% 50% at 15% 20%,rgba(255,170,130,0.35) 0%,transparent 70%),
-               radial-gradient(ellipse 50% 60% at 80% 15%,rgba(240,140,170,0.30) 0%,transparent 70%),
-               radial-gradient(ellipse 70% 45% at 50% 85%,rgba(245,180,120,0.28) 0%,transparent 70%);"></div>
-  <nav style="background:rgba(250,228,210,0.68);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);border-bottom:1px solid rgba(235,170,140,0.40);padding:0 28px;display:flex;align-items:center;justify-content:space-between;height:66px;position:sticky;top:0;z-index:100;box-shadow:0 2px 20px rgba(180,80,60,0.14);">
+  <nav style="${navBg}padding:0 28px;display:flex;align-items:center;justify-content:space-between;height:66px;position:sticky;top:0;z-index:100;box-shadow:0 2px 16px rgba(120,110,98,0.18);">
     <div style="display:flex;align-items:center;gap:9px;flex-shrink:0;">
       <div style="width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#E8663A,#D95F7A);display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:900;box-shadow:0 3px 12px rgba(232,102,58,0.4);">▲</div>
       <span style="font-size:18px;font-weight:800;color:#2C1810;letter-spacing:-0.5px;">SignalStack <span style="font-size:12px;font-weight:600;color:#E8663A;letter-spacing:0.02em;">ADMIN</span></span>
