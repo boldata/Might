@@ -101,9 +101,9 @@ const btnStyle = (v = 'primary') => {
     secondary: `background:rgba(232,102,58,0.10);color:#C9481E;border:1px solid rgba(232,102,58,0.35)!important;backdrop-filter:blur(8px);`,
     danger:    `background:linear-gradient(135deg,#C0302A,#9B1C18);color:#fff;box-shadow:0 2px 10px rgba(192,48,42,0.38);`,
     ghost:     `background:rgba(253,220,200,0.35);color:#8B3C10;border:1px solid rgba(220,160,130,0.4)!important;backdrop-filter:blur(8px);`,
-    gold:      `background:linear-gradient(135deg,#E8663A,#D95F7A);color:#fff;box-shadow:0 3px 14px rgba(217,95,122,0.38);`,
+    gold:      `background:linear-gradient(135deg,#E8663A,#C9481E);color:#fff;box-shadow:0 3px 14px rgba(232,102,58,0.38);`,
     dark:      `background:rgba(44,24,16,0.85);color:#FDF5EE;backdrop-filter:blur(8px);`,
-    pink:      `background:linear-gradient(135deg,#D95F7A,#C04868);color:#fff;box-shadow:0 3px 14px rgba(217,95,122,0.38);`,
+    pink:      `background:linear-gradient(135deg,#E8663A,#C9481E);color:#fff;box-shadow:0 3px 14px rgba(232,102,58,0.38);`,
   };
   return base + (variants[v] || variants.primary);
 };
@@ -515,34 +515,26 @@ function renderSubscriberDashboard() {
 
 function renderOpenPositionCard(a) {
   const days = daysToClose(a.buyDate, null);
-  // Tier badge: clean greige pill
-  const tierBadge = `display:inline-flex;align-items:center;padding:3px 11px;border-radius:50px;font-size:10px;font-weight:600;background:#ECEAE6;color:#555050;border:1px solid rgba(0,0,0,0.10);letter-spacing:0.06em;text-transform:uppercase;`;
   return `
-<div onclick="openAlertModal(${a.id})" class="pos-card" style="cursor:pointer;margin-bottom:28px;background:#E8E5DF;border-radius:20px;padding:18px 16px;border:1px solid rgba(200,195,188,0.55);box-shadow:0 3px 14px rgba(100,90,80,0.10);">
-  <!-- Top row: ticker + badge + days -->
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-    <div style="display:flex;align-items:center;gap:9px;">
-      <span style="font-weight:900;font-size:23px;color:#0F283C;letter-spacing:-0.5px;">${a.ticker}</span>
-      <span style="${tierBadge}">${TIERS[a.tier]?.label||a.tier}</span>
-    </div>
-    <span style="font-size:12px;color:#8A8278;font-weight:500;">${days}d&nbsp;·&nbsp;${fmtDate(a.buyDate)}</span>
+<div onclick="openAlertModal(${a.id})" class="pos-card" style="cursor:pointer;margin-bottom:10px;background:#E8E5DF;border-radius:16px;padding:11px 13px;border:1px solid rgba(200,195,188,0.55);box-shadow:0 2px 8px rgba(100,90,80,0.09);">
+  <!-- Top row: ticker + days -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+    <span style="font-weight:800;font-size:16px;color:#0F283C;letter-spacing:-0.3px;">${a.ticker}</span>
+    <span style="font-size:11px;color:#8A8278;font-weight:500;">${days}d&nbsp;·&nbsp;${fmtDate(a.buyDate)}</span>
   </div>
-  <!-- Three pill buttons -->
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px;">
-    <!-- ENTRY: solid deep teal -->
-    <div style="background:#006E67;border-radius:50px;padding:13px 6px;text-align:center;">
-      <div style="font-size:10px;color:rgba(255,255,255,0.72);font-weight:600;text-transform:uppercase;letter-spacing:0.10em;margin-bottom:5px;">Entry</div>
-      <div style="font-size:20px;font-weight:800;color:#fff;letter-spacing:-0.5px;">$${a.entry}</div>
+  <!-- Three single-line capsules -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">
+    <div style="background:rgba(253,235,220,0.85);border:1px solid rgba(220,160,130,0.30);border-radius:50px;padding:6px 8px;display:flex;align-items:center;justify-content:center;gap:5px;">
+      <span style="font-size:9px;color:rgba(90,45,25,0.60);font-weight:700;text-transform:uppercase;letter-spacing:0.07em;">Entry</span>
+      <span style="font-size:13px;font-weight:800;color:#2C1810;">$${a.entry}</span>
     </div>
-    <!-- TARGET: light mint -->
-    <div style="background:#C2E8E0;border-radius:50px;padding:13px 6px;text-align:center;">
-      <div style="font-size:10px;color:#007A72;font-weight:600;text-transform:uppercase;letter-spacing:0.10em;margin-bottom:5px;">Target</div>
-      <div style="font-size:20px;font-weight:800;color:#005E58;letter-spacing:-0.5px;">$${a.t1}</div>
+    <div style="background:rgba(180,248,210,0.50);border:1px solid rgba(100,200,150,0.25);border-radius:50px;padding:6px 8px;display:flex;align-items:center;justify-content:center;gap:5px;">
+      <span style="font-size:9px;color:rgba(20,90,50,0.65);font-weight:700;text-transform:uppercase;letter-spacing:0.07em;">Target</span>
+      <span style="font-size:13px;font-weight:800;color:#1A7A50;">$${a.t1}</span>
     </div>
-    <!-- STOP: soft blush pink -->
-    <div style="background:#F8D2CD;border-radius:50px;padding:13px 6px;text-align:center;">
-      <div style="font-size:10px;color:#9B3830;font-weight:600;text-transform:uppercase;letter-spacing:0.10em;margin-bottom:5px;">Stop</div>
-      <div style="font-size:20px;font-weight:800;color:#9B3830;letter-spacing:-0.5px;">$${a.sl}</div>
+    <div style="background:rgba(255,200,195,0.55);border:1px solid rgba(200,80,70,0.20);border-radius:50px;padding:6px 8px;display:flex;align-items:center;justify-content:center;gap:5px;">
+      <span style="font-size:9px;color:rgba(140,40,30,0.65);font-weight:700;text-transform:uppercase;letter-spacing:0.07em;">Stop</span>
+      <span style="font-size:13px;font-weight:800;color:#C0302A;">$${a.sl}</span>
     </div>
   </div>
 </div>`;
@@ -619,10 +611,10 @@ function renderSubscriberAlerts() {
       </div>
     </div>`).join('') : ''}
     ${!locked && u.tier === 'trader' ? `
-    <div style="${glass}border-radius:20px;padding:22px;cursor:default;border:2px dashed rgba(217,95,122,0.35);min-height:180px;display:flex;align-items:center;justify-content:center;">
+    <div style="${glass}border-radius:20px;padding:22px;cursor:default;border:2px dashed rgba(232,102,58,0.35);min-height:180px;display:flex;align-items:center;justify-content:center;">
       <div style="text-align:center;padding:24px 16px;">
         <div style="font-size:36px;margin-bottom:12px;opacity:0.5;">🔒</div>
-        <div style="font-size:13px;font-weight:700;color:#D95F7A;margin-bottom:5px;">Elite Alert</div>
+        <div style="font-size:13px;font-weight:700;color:#E8663A;margin-bottom:5px;">Elite Alert</div>
         <div style="font-size:12px;color:#9B8570;margin-bottom:16px;">Upgrade to Elite to unlock</div>
         <button onclick="setTab('account')" class="btn-glow" style="${btnStyle('pink')}font-size:12px;padding:8px 16px;">Upgrade →</button>
       </div>
@@ -1053,7 +1045,7 @@ function renderAdminApp() {
         <div style="font-weight:700;color:#2C1810;font-size:13px;">${u.name}</div>
         <div style="color:#E8663A;font-weight:700;font-size:11px;letter-spacing:0.04em;">ADMIN</div>
       </div>
-      <div style="width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#D95F7A,#C04868);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;box-shadow:0 2px 10px rgba(217,95,122,0.35);">${u.name.charAt(0)}</div>
+      <div style="width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#E8663A,#C9481E);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;box-shadow:0 2px 10px rgba(232,102,58,0.35);">${u.name.charAt(0)}</div>
       <button onclick="handleLogout()" style="${btnStyle('ghost')}font-size:12px;padding:7px 13px;">Sign Out</button>
     </div>
   </nav>
@@ -1350,7 +1342,7 @@ function renderAdminAccount() {
   <div style="${cardStyle}margin-bottom:22px;" id="admin-profile-card">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:18px;">
       <div style="display:flex;gap:18px;align-items:center;">
-        <div style="width:60px;height:60px;border-radius:18px;background:linear-gradient(135deg,#D95F7A,#C04868);color:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:800;box-shadow:0 4px 18px rgba(217,95,122,0.38);">${u.name.charAt(0).toUpperCase()}</div>
+        <div style="width:60px;height:60px;border-radius:18px;background:linear-gradient(135deg,#E8663A,#C9481E);color:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:800;box-shadow:0 4px 18px rgba(232,102,58,0.38);">${u.name.charAt(0).toUpperCase()}</div>
         <div>
           <div style="font-weight:800;font-size:19px;color:#2C1810;">${u.name}</div>
           <div style="color:#9B8570;font-size:13px;margin-top:2px;">${u.email}</div>
