@@ -33,8 +33,8 @@ const TIERS = {
 const TIER_ORDER = { trader: 0, elite: 1 };
 const canSeeAlert = (userTier, alertTier) => userTier && TIER_ORDER[userTier] >= TIER_ORDER[alertTier];
 
-const TODAY = new Date('2026-03-25');
-const TODAY_MONTH = 2;
+const TODAY = new Date();
+const TODAY_MONTH = TODAY.getMonth();
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 // ─── Color Palette (matches styles.css) ──────────────────────────────────────
@@ -216,14 +216,7 @@ function renderAuthPage() {
       ${m==='login'  ? `<button onclick="setAuthMode('forgot')" style="background:none;border:none;cursor:pointer;font-size:12px;color:#E8663A;font-family:'Inter',sans-serif;font-weight:600;">Forgot password?</button>` : ''}
       ${m==='forgot' ? `<button onclick="setAuthMode('login')"  style="background:none;border:none;cursor:pointer;font-size:12px;color:#9B8570;font-family:'Inter',sans-serif;">← Back to Sign In</button>` : ''}
     </div>
-    ${m==='login' ? `
-    <div style="margin-top:18px;padding-top:16px;border-top:1px solid rgba(220,160,130,0.30);">
-      <p style="font-size:10px;color:rgba(130,70,45,0.55);text-align:center;line-height:2;letter-spacing:0.02em;">
-        <strong style="color:rgba(90,45,25,0.7);">alex@example.com</strong> (Elite Active) · <strong style="color:rgba(90,45,25,0.7);">sarah@example.com</strong> (Trader Active)<br>
-        <strong style="color:rgba(90,45,25,0.7);">jordan@example.com</strong> (No Plan) · <strong style="color:rgba(90,45,25,0.7);">sam@example.com</strong> (Cancelled)<br>
-        <strong style="color:rgba(90,45,25,0.7);">admin@signalstack.com</strong> (Admin) — Passwords: <strong style="color:rgba(90,45,25,0.7);">pass123</strong> / Admin: <strong style="color:rgba(90,45,25,0.7);">admin123</strong>
-      </p>
-    </div>` : ''}
+
   </div>
 </div>`;
 }
@@ -343,7 +336,7 @@ function renderSubscriberApp() {
       <div style="position:relative;">
         <button onclick="toggleNotifs()" style="background:rgba(253,220,200,0.35);border:1px solid rgba(220,160,130,0.35);border-radius:10px;cursor:pointer;padding:7px 9px;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);" title="Notifications">
           <span style="font-size:18px;line-height:1;">🔔</span>
-          ${unread.length > 0 ? `<span class="badge-bounce" style="position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;border-radius:9px;background:linear-gradient(135deg,#E8663A,#D95F7A);color:#fff;font-size:9px;font-weight:800;display:flex;align-items:center;justify-content:center;padding:0 4px;border:2px solid rgba(253,235,220,0.8);">${unread.length > 9 ? '9+' : unread.length}</span>` : ''}
+          ${unread.length > 0 ? `<span class="badge-bounce notif-badge" style="position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;border-radius:9px;background:linear-gradient(135deg,#E8663A,#D95F7A);color:#fff;font-size:9px;font-weight:800;display:flex;align-items:center;justify-content:center;padding:0 4px;border:2px solid rgba(253,235,220,0.8);">${unread.length > 9 ? '9+' : unread.length}</span>` : ''}
         </button>
         <!-- Notification panel -->
         <div id="notif-panel" style="display:none;position:absolute;right:0;top:calc(100% + 10px);width:350px;background:rgba(253,240,228,0.92);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid rgba(255,200,175,0.55);border-radius:18px;box-shadow:0 16px 48px rgba(180,80,60,0.22);z-index:300;overflow:hidden;" class="notif-dropdown">
@@ -393,13 +386,33 @@ function renderSubscriberApp() {
 
 function setTab(t) { STATE.tab = t; render(); }
 
-function toggleNotifs() {
+async function toggleNotifs() {
   const p = document.getElementById('notif-panel');
   const o = document.getElementById('notif-overlay');
   if (!p) return;
   const isOpen = p.style.display !== 'none';
-  p.style.display = isOpen ? 'none' : 'block';
-  if (o) o.style.display = isOpen ? 'none' : 'block';
+  if (isOpen) {
+    // closing — just hide
+    p.style.display = 'none';
+    if (o) o.style.display = 'none';
+  } else {
+    // opening — show panel then auto-clear notifications
+    p.style.display = 'block';
+    if (o) o.style.display = 'block';
+    const unread = getUnreadAlerts();
+    if (unread.length > 0) {
+      // mark all seen silently in the background
+      const u = STATE.currentUser;
+      const allIds = STATE.alerts.map(a => a.id);
+      try {
+        const { user } = await API.put(`/api/users/${u.id}`, { seenAlertIds: allIds });
+        STATE.currentUser = user;
+        // re-render just the nav badge without closing the panel
+        const badge = document.querySelector('.notif-badge');
+        if (badge) badge.remove();
+      } catch (e) { console.error(e); }
+    }
+  }
 }
 
 function closeNotifs() {
