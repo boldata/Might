@@ -207,6 +207,17 @@ function renderAuthPage() {
     <div style="margin-bottom:16px;"><label style="${labelStyle}">Email Address</label><input id="auth-email" type="email" style="${inputStyle}" placeholder="you@example.com"></div>
     ${m !== 'forgot' ? `<div style="margin-bottom:16px;"><label style="${labelStyle}">Password</label><input id="auth-password" type="password" style="${inputStyle}" placeholder="••••••••"></div>` : ''}
     ${m==='register' ? `<div style="margin-bottom:16px;"><label style="${labelStyle}">Confirm Password</label><input id="auth-confirm" type="password" style="${inputStyle}" placeholder="••••••••"></div>` : ''}
+    ${m==='register' ? `
+    <div style="margin-bottom:18px;padding:14px 16px;background:rgba(232,102,58,0.07);border-radius:12px;border:1px solid rgba(232,102,58,0.18);">
+      <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+        <input type="checkbox" id="auth-terms" style="width:17px;height:17px;margin-top:1px;accent-color:#E8663A;flex-shrink:0;cursor:pointer;">
+        <span style="font-size:12px;color:rgba(44,24,16,0.75);line-height:1.6;">
+          I agree to the <button type="button" onclick="showTCModal()" style="background:none;border:none;padding:0;cursor:pointer;color:#E8663A;font-weight:700;font-size:12px;font-family:'Inter',sans-serif;text-decoration:underline;">Terms &amp; Conditions</button>
+          and <button type="button" onclick="showTCModal()" style="background:none;border:none;padding:0;cursor:pointer;color:#E8663A;font-weight:700;font-size:12px;font-family:'Inter',sans-serif;text-decoration:underline;">Privacy Policy</button>.
+          By creating an account I confirm I am 18+ and understand that all trade alerts are for informational purposes only and do not constitute financial advice.
+        </span>
+      </label>
+    </div>` : ''}
     <div id="auth-error" style="display:none;color:#C0302A;font-size:13px;margin-bottom:12px;padding:10px 14px;background:rgba(255,200,195,0.65);border-radius:10px;border:1px solid rgba(192,48,42,0.2);"></div>
     <div id="auth-ok"    style="display:none;color:#1A7A50;font-size:13px;margin-bottom:12px;padding:10px 14px;background:rgba(180,248,210,0.55);border-radius:10px;border:1px solid rgba(26,122,80,0.2);"></div>
     <button onclick="handleAuth()" class="btn-glow" style="${btnStyle('primary')};width:100%;justify-content:center;padding:14px;font-size:15px;margin-bottom:16px;border-radius:14px;">
@@ -256,6 +267,7 @@ async function handleAuth() {
       if (!name || !email || !password) { showErr('All fields required.'); return; }
       if (password !== confirm) { showErr('Passwords do not match.'); return; }
       if (password.length < 6) { showErr('Minimum 6 characters.'); return; }
+      if (!document.getElementById('auth-terms')?.checked) { showErr('Please accept the Terms & Conditions to continue.'); return; }
       const { token, user } = await API.post('/api/auth/register', { name, email, password });
       API.token = token; localStorage.setItem('ss_token', token);
       STATE.currentUser = user; STATE.tab = 'dashboard';
@@ -265,6 +277,65 @@ async function handleAuth() {
       showOk(`Password reset link sent to ${email}. Check your inbox.`);
     }
   } catch (e) { showErr(e.message || 'Something went wrong.'); }
+}
+
+// ─── TERMS & CONDITIONS MODAL ────────────────────────────────────────────────
+function showTCModal() {
+  const overlay = document.createElement('div');
+  overlay.id = 'tc-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,20,25,0.60);backdrop-filter:blur(6px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.onclick = (e) => { if (e.target === overlay) closeTCModal(); };
+  overlay.innerHTML = `
+<div style="background:#fff;border-radius:24px;width:100%;max-width:560px;max-height:80vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,0.28);">
+  <div style="padding:22px 26px 16px;border-bottom:1px solid rgba(220,215,208,0.70);display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">
+    <div>
+      <h2 style="font-size:18px;font-weight:800;color:#0F1E2E;margin:0 0 3px;">Terms &amp; Conditions</h2>
+      <p style="font-size:12px;color:#9A9189;margin:0;">Last updated: April 1, 2026</p>
+    </div>
+    <button onclick="closeTCModal()" style="background:rgba(240,236,230,0.80);border:none;cursor:pointer;width:32px;height:32px;border-radius:50%;font-size:16px;display:flex;align-items:center;justify-content:center;color:#555;transition:background 0.15s;">&times;</button>
+  </div>
+  <div style="overflow-y:auto;padding:22px 26px;flex:1;line-height:1.75;color:#2C2420;font-size:13px;">
+    <h3 style="font-size:14px;font-weight:700;color:#0F1E2E;margin:0 0 8px;">1. Acceptance of Terms</h3>
+    <p style="margin:0 0 16px;">By creating an account on SignalStack, you agree to be bound by these Terms and Conditions. If you do not agree, you may not access or use our services. You must be at least 18 years of age to register.</p>
+
+    <h3 style="font-size:14px;font-weight:700;color:#0F1E2E;margin:0 0 8px;">2. No Financial Advice</h3>
+    <p style="margin:0 0 16px;">All trade alerts, signals, analysis, and content provided by SignalStack are for <strong>informational and educational purposes only</strong>. Nothing on this platform constitutes financial, investment, legal, or tax advice. Always consult a qualified financial professional before making any investment decisions. Past performance of any signal or alert does not guarantee future results.</p>
+
+    <h3 style="font-size:14px;font-weight:700;color:#0F1E2E;margin:0 0 8px;">3. Subscription & Billing</h3>
+    <p style="margin:0 0 16px;">SignalStack offers subscription plans (Trader at $229/mo; Elite at $769/mo). Subscriptions renew automatically each month. You may cancel at any time through your account settings, effective at the end of the current billing period. No partial refunds are issued for unused portions of a billing cycle. We reserve the right to modify pricing with 30 days' notice.</p>
+
+    <h3 style="font-size:14px;font-weight:700;color:#0F1E2E;margin:0 0 8px;">4. Risk Disclosure</h3>
+    <p style="margin:0 0 16px;">Trading stocks, options, futures, forex, and other financial instruments carries a <strong>high level of risk</strong> and may not be suitable for all investors. You could lose some or all of your invested capital. SignalStack and its operators accept no liability for financial losses incurred from acting on any signals or information provided on this platform.</p>
+
+    <h3 style="font-size:14px;font-weight:700;color:#0F1E2E;margin:0 0 8px;">5. Account Responsibilities</h3>
+    <p style="margin:0 0 16px;">You are responsible for maintaining the confidentiality of your account credentials and for all activities that occur under your account. You agree not to share, sell, or transfer your account or subscription access to any third party. Violation of this clause may result in immediate termination of your account without refund.</p>
+
+    <h3 style="font-size:14px;font-weight:700;color:#0F1E2E;margin:0 0 8px;">6. Privacy Policy</h3>
+    <p style="margin:0 0 16px;">We collect your name, email address, and usage data to provide and improve our services. We do not sell your personal information to third parties. Your data is protected in accordance with applicable privacy laws. By using SignalStack you consent to our data collection and processing practices as described herein.</p>
+
+    <h3 style="font-size:14px;font-weight:700;color:#0F1E2E;margin:0 0 8px;">7. Intellectual Property</h3>
+    <p style="margin:0 0 16px;">All content on SignalStack — including alerts, analysis, trade signals, branding, and UI — is the proprietary property of SignalStack. You may not reproduce, redistribute, or commercially exploit any content without express written permission.</p>
+
+    <h3 style="font-size:14px;font-weight:700;color:#0F1E2E;margin:0 0 8px;">8. Modifications & Termination</h3>
+    <p style="margin:0 0 0;">SignalStack reserves the right to modify these Terms at any time. Continued use of the service after changes constitutes acceptance of the new Terms. We may suspend or terminate accounts that violate these Terms at our sole discretion.</p>
+  </div>
+  <div style="padding:16px 26px;border-top:1px solid rgba(220,215,208,0.70);display:flex;gap:10px;justify-content:flex-end;flex-shrink:0;">
+    <button onclick="closeTCModal()" style="padding:10px 22px;border-radius:12px;border:1px solid rgba(220,215,208,0.80);background:rgba(240,236,230,0.70);color:#555;font-size:13px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;">Close</button>
+    <button onclick="acceptTC()" style="padding:10px 22px;border-radius:12px;border:none;background:linear-gradient(135deg,#E8663A,#C9481E);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;box-shadow:0 3px 12px rgba(232,102,58,0.38);">I Accept ✓</button>
+  </div>
+</div>`;
+  document.body.appendChild(overlay);
+}
+
+function closeTCModal() {
+  const el = document.getElementById('tc-overlay');
+  if (el) el.remove();
+}
+
+function acceptTC() {
+  const cb = document.getElementById('auth-terms');
+  if (cb) cb.checked = true;
+  closeTCModal();
 }
 
 // ─── LOGOUT ──────────────────────────────────────────────────────────────────
@@ -492,7 +563,7 @@ function renderSubscriberDashboard() {
         </button>
       </div>` :
       active.length === 0 ? `<p style="font-size:13px;color:rgba(90,45,25,0.65);padding:20px 0;text-align:center;">No active trades in your tier</p>` :
-      active.map(a => renderOpenPositionCard(a)).join('')}
+      `<div style="padding-bottom:12px;">${active.map(a => renderOpenPositionCard(a)).join('')}</div>`}
     </div>
     <!-- Recent Closed -->
     <div style="${cardStyle}">
@@ -528,30 +599,45 @@ function renderSubscriberDashboard() {
 
 function renderOpenPositionCard(a) {
   const days = daysToClose(a.buyDate, null);
+  const saved = (STATE.currentUser?.watchlist || []).includes(a.id);
   return `
-<div onclick="openAlertModal(${a.id})" class="pos-card" style="cursor:pointer;margin-bottom:10px;background:#E8E5DF;border-radius:16px;padding:11px 13px;border:1px solid rgba(200,195,188,0.55);box-shadow:0 2px 8px rgba(100,90,80,0.09);">
+<div class="pos-card" style="cursor:default;margin-bottom:12px;background:#fff;border-radius:22px;padding:16px 16px 14px;border:1px solid rgba(220,218,214,0.70);box-shadow:0 3px 16px rgba(80,70,60,0.10);position:relative;">
   <!-- Top row: ticker + days -->
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-    <span style="font-weight:800;font-size:16px;color:#0F283C;letter-spacing:-0.3px;">${a.ticker}</span>
-    <span style="font-size:11px;color:#8A8278;font-weight:500;">${days}d&nbsp;·&nbsp;${fmtDate(a.buyDate)}</span>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+    <span style="font-weight:900;font-size:22px;color:#0F1E2E;letter-spacing:-0.5px;" onclick="openAlertModal(${a.id})" style="cursor:pointer;">${a.ticker}</span>
+    <span style="font-size:12px;color:#9A9189;font-weight:500;">${days !== null ? days+'d' : ''}&nbsp;·&nbsp;${fmtDate(a.buyDate)}</span>
   </div>
-  <!-- Three single-line capsules -->
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">
-    <div style="background:rgba(253,235,220,0.85);border:1px solid rgba(220,160,130,0.30);border-radius:50px;padding:6px 8px;display:flex;align-items:center;justify-content:center;gap:5px;">
-      <span style="font-size:9px;color:rgba(90,45,25,0.60);font-weight:700;text-transform:uppercase;letter-spacing:0.07em;">Entry</span>
-      <span style="font-size:13px;font-weight:800;color:#2C1810;">$${a.entry}</span>
+  <!-- Three large pill capsules matching reference design -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:0;">
+    <!-- ENTRY: amber/orange gradient -->
+    <div onclick="openAlertModal(${a.id})" style="cursor:pointer;background:linear-gradient(135deg,#F5B942 0%,#E8883A 100%);border-radius:50px;padding:13px 10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;">
+      <span style="font-size:9px;color:#0F1E2E;font-weight:800;text-transform:uppercase;letter-spacing:0.10em;opacity:0.75;">Entry</span>
+      <span style="font-size:16px;font-weight:900;color:#0F1E2E;letter-spacing:-0.3px;">$${a.entry}</span>
     </div>
-    <div style="background:rgba(180,248,210,0.50);border:1px solid rgba(100,200,150,0.25);border-radius:50px;padding:6px 8px;display:flex;align-items:center;justify-content:center;gap:5px;">
-      <span style="font-size:9px;color:rgba(20,90,50,0.65);font-weight:700;text-transform:uppercase;letter-spacing:0.07em;">Target</span>
-      <span style="font-size:13px;font-weight:800;color:#1A7A50;">$${a.t1}</span>
+    <!-- TARGET: solid green -->
+    <div onclick="openAlertModal(${a.id})" style="cursor:pointer;background:linear-gradient(135deg,#3DB870 0%,#229954 100%);border-radius:50px;padding:13px 10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;">
+      <span style="font-size:9px;color:#fff;font-weight:800;text-transform:uppercase;letter-spacing:0.10em;opacity:0.85;">Target</span>
+      <span style="font-size:16px;font-weight:900;color:#fff;letter-spacing:-0.3px;">$${a.t1}</span>
     </div>
-    <div style="background:rgba(255,200,195,0.55);border:1px solid rgba(200,80,70,0.20);border-radius:50px;padding:6px 8px;display:flex;align-items:center;justify-content:center;gap:5px;">
-      <span style="font-size:9px;color:rgba(140,40,30,0.65);font-weight:700;text-transform:uppercase;letter-spacing:0.07em;">Stop</span>
-      <span style="font-size:13px;font-weight:800;color:#C0302A;">$${a.sl}</span>
+    <!-- STOP: solid red -->
+    <div onclick="openAlertModal(${a.id})" style="cursor:pointer;background:linear-gradient(135deg,#F05050 0%,#C0302A 100%);border-radius:50px;padding:13px 10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;">
+      <span style="font-size:9px;color:#fff;font-weight:800;text-transform:uppercase;letter-spacing:0.10em;opacity:0.85;">Stop</span>
+      <span style="font-size:16px;font-weight:900;color:#fff;letter-spacing:-0.3px;">$${a.sl}</span>
     </div>
   </div>
+  <!-- Thumbs-up action button (bottom-right, floating) -->
+  <button onclick="event.stopPropagation();toggleWatchlist(${a.id})" title="${saved?'Unlike':'Like'}"
+    style="position:absolute;bottom:-10px;right:12px;width:36px;height:36px;border-radius:50%;background:#fff;border:1.5px solid rgba(200,195,188,0.70);box-shadow:0 3px 12px rgba(80,70,60,0.15);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.18s;color:${saved?'#E8663A':'#9A9189'};">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="${saved?'#E8663A':'none'}" stroke="${saved?'#E8663A':'#9A9189'}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/>
+      <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
+    </svg>
+  </button>
 </div>`;
 }
+
+// add bottom margin to last card to account for floating thumbs-up
+
 
 function renderCancelledBanner() {
   return `<div style="${glass}border-radius:16px;padding:18px 22px;margin-bottom:22px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;border-left:4px solid #C0302A;">
