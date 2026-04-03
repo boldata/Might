@@ -31,6 +31,9 @@ async function getUser(db: D1Database, token: string) {
   return row || null
 }
 
+function isAdmin(u: any) { return u?.role === 'admin' }
+function isAdminOrManager(u: any) { return u?.role === 'admin' || u?.role === 'manager' }
+
 // ─── AUTH ───────────────────────────────────────────────────────────────────
 app.post('/api/auth/login', async (c) => {
   const { email, password } = await c.req.json()
@@ -75,7 +78,7 @@ app.get('/api/auth/me', async (c) => {
 app.get('/api/users', async (c) => {
   const token = c.req.header('Authorization')?.replace('Bearer ', '')
   const me = await getUser(c.env.DB, token || '') as any
-  if (!me || me.role !== 'admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!me || !isAdminOrManager(me)) return c.json({ error: 'Forbidden' }, 403)
   const rows = await c.env.DB.prepare('SELECT * FROM users ORDER BY id').all()
   return c.json({ users: rows.results.map(formatUser) })
 })
@@ -83,15 +86,17 @@ app.get('/api/users', async (c) => {
 app.post('/api/users', async (c) => {
   const token = c.req.header('Authorization')?.replace('Bearer ', '')
   const me = await getUser(c.env.DB, token || '') as any
-  if (!me || me.role !== 'admin') return c.json({ error: 'Forbidden' }, 403)
-  const { name, email, password, tier, subscriptionStatus } = await c.req.json()
+  if (!me || !isAdminOrManager(me)) return c.json({ error: 'Forbidden' }, 403)
+  const { name, email, password, tier, subscriptionStatus, role } = await c.req.json()
   if (!name || !email) return c.json({ error: 'Name and email required.' }, 400)
+  // Only admin can create managers
+  const assignedRole = (role === 'manager' && isAdmin(me)) ? 'manager' : 'subscriber'
   const exists = await c.env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first()
   if (exists) return c.json({ error: 'Email already exists.' }, 409)
   const joined = new Date().toISOString().split('T')[0]
   const result = await c.env.DB.prepare(
-    'INSERT INTO users (name, email, password, role, tier, subscription_status, joined) VALUES (?, ?, ?, "subscriber", ?, ?, ?)'
-  ).bind(name, email, password || 'pass123', tier || null, subscriptionStatus || 'active', joined).run()
+    'INSERT INTO users (name, email, password, role, tier, subscription_status, joined) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).bind(name, email, password || 'pass123', assignedRole, tier || null, subscriptionStatus || 'active', joined).run()
   const user = await c.env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(result.meta.last_row_id).first() as any
   return c.json({ user: formatUser(user) })
 })
@@ -101,8 +106,7 @@ app.put('/api/users/:id', async (c) => {
   const me = await getUser(c.env.DB, token || '') as any
   if (!me) return c.json({ error: 'Unauthorized' }, 401)
   const id = parseInt(c.req.param('id'))
-  // Users can only update themselves; admins can update anyone
-  if (me.role !== 'admin' && me.id !== id) return c.json({ error: 'Forbidden' }, 403)
+  if (!isAdminOrManager(me) && me.id !== id) return c.json({ error: 'Forbidden' }, 403)
   const body = await c.req.json()
   const user = await c.env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(id).first() as any
   if (!user) return c.json({ error: 'User not found' }, 404)
@@ -114,10 +118,12 @@ app.put('/api/users/:id', async (c) => {
   const watchlist = body.watchlist !== undefined ? JSON.stringify(body.watchlist) : user.watchlist
   const seenAlertIds = body.seenAlertIds !== undefined ? JSON.stringify(body.seenAlertIds) : user.seen_alert_ids
   const notifications = body.notifications !== undefined ? (body.notifications ? 1 : 0) : user.notifications
+  // Only admin can change roles
+  const role = (body.role !== undefined && isAdmin(me)) ? body.role : user.role
 
   await c.env.DB.prepare(
-    'UPDATE users SET name=?, password=?, tier=?, subscription_status=?, watchlist=?, seen_alert_ids=?, notifications=? WHERE id=?'
-  ).bind(name, password, tier, subscriptionStatus, watchlist, seenAlertIds, notifications, id).run()
+    'UPDATE users SET name=?, password=?, tier=?, subscription_status=?, watchlist=?, seen_alert_ids=?, notifications=?, role=? WHERE id=?'
+  ).bind(name, password, tier, subscriptionStatus, watchlist, seenAlertIds, notifications, role, id).run()
   const updated = await c.env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(id).first() as any
   return c.json({ user: formatUser(updated) })
 })
@@ -125,7 +131,7 @@ app.put('/api/users/:id', async (c) => {
 app.delete('/api/users/:id', async (c) => {
   const token = c.req.header('Authorization')?.replace('Bearer ', '')
   const me = await getUser(c.env.DB, token || '') as any
-  if (!me || me.role !== 'admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!me || !isAdmin(me)) return c.json({ error: 'Forbidden' }, 403)
   const id = parseInt(c.req.param('id'))
   await c.env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(id).run()
   await c.env.DB.prepare('DELETE FROM users WHERE id = ?').bind(id).run()
@@ -144,11 +150,11 @@ app.get('/api/alerts', async (c) => {
 app.post('/api/alerts', async (c) => {
   const token = c.req.header('Authorization')?.replace('Bearer ', '')
   const me = await getUser(c.env.DB, token || '') as any
-  if (!me || me.role !== 'admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!me || !isAdminOrManager(me)) return c.json({ error: 'Forbidden' }, 403)
   const { ticker, title, description, category, tier, priority, status, entry, t1, sl } = await c.req.json()
   const created = new Date().toISOString().split('T')[0]
   const result = await c.env.DB.prepare(
-    'INSERT INTO alerts (ticker, title, description, category, tier, priority, status, entry, t1, sl, pnl, views, buy_date, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "0%", 0, ?, ?)'
+    'INSERT INTO alerts (ticker, title, description, category, tier, priority, status, entry, t1, sl, pnl, views, buy_date, created, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "0%", 0, ?, ?, NULL)'
   ).bind(ticker, title, description, category, tier, priority, status, entry, t1, sl, created, created).run()
   const alert = await c.env.DB.prepare('SELECT * FROM alerts WHERE id = ?').bind(result.meta.last_row_id).first() as any
   return c.json({ alert: formatAlert(alert) })
@@ -157,7 +163,7 @@ app.post('/api/alerts', async (c) => {
 app.put('/api/alerts/:id', async (c) => {
   const token = c.req.header('Authorization')?.replace('Bearer ', '')
   const me = await getUser(c.env.DB, token || '') as any
-  if (!me || me.role !== 'admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!me || !isAdminOrManager(me)) return c.json({ error: 'Forbidden' }, 403)
   const id = parseInt(c.req.param('id'))
   const alert = await c.env.DB.prepare('SELECT * FROM alerts WHERE id = ?').bind(id).first() as any
   if (!alert) return c.json({ error: 'Alert not found' }, 404)
@@ -174,9 +180,10 @@ app.put('/api/alerts/:id', async (c) => {
   const sl = body.sl ?? alert.sl
   const pnl = body.pnl ?? alert.pnl
   const closeDate = body.closeDate !== undefined ? body.closeDate : alert.close_date
+  const updatedAt = new Date().toISOString().split('T')[0]
   await c.env.DB.prepare(
-    'UPDATE alerts SET ticker=?, title=?, description=?, category=?, tier=?, priority=?, status=?, entry=?, t1=?, sl=?, pnl=?, close_date=? WHERE id=?'
-  ).bind(ticker, title, description, category, tier, priority, status, entry, t1, sl, pnl, closeDate, id).run()
+    'UPDATE alerts SET ticker=?, title=?, description=?, category=?, tier=?, priority=?, status=?, entry=?, t1=?, sl=?, pnl=?, close_date=?, updated_at=? WHERE id=?'
+  ).bind(ticker, title, description, category, tier, priority, status, entry, t1, sl, pnl, closeDate, updatedAt, id).run()
   const updated = await c.env.DB.prepare('SELECT * FROM alerts WHERE id = ?').bind(id).first() as any
   return c.json({ alert: formatAlert(updated) })
 })
@@ -184,9 +191,34 @@ app.put('/api/alerts/:id', async (c) => {
 app.delete('/api/alerts/:id', async (c) => {
   const token = c.req.header('Authorization')?.replace('Bearer ', '')
   const me = await getUser(c.env.DB, token || '') as any
-  if (!me || me.role !== 'admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!me || !isAdmin(me)) return c.json({ error: 'Forbidden' }, 403)
   const id = parseInt(c.req.param('id'))
   await c.env.DB.prepare('DELETE FROM alerts WHERE id = ?').bind(id).run()
+  return c.json({ ok: true })
+})
+
+// ─── PRICING ─────────────────────────────────────────────────────────────────
+app.get('/api/pricing', async (c) => {
+  const token = c.req.header('Authorization')?.replace('Bearer ', '')
+  const me = await getUser(c.env.DB, token || '') as any
+  if (!me) return c.json({ error: 'Unauthorized' }, 401)
+  // Return pricing from settings table
+  const rows = await c.env.DB.prepare("SELECT * FROM settings WHERE key IN ('price_trader','price_elite','name_trader','name_elite','desc_trader','desc_elite')").all()
+  const result: any = {}
+  rows.results.forEach((r: any) => { result[r.key] = r.value })
+  return c.json({ pricing: result })
+})
+
+app.put('/api/pricing', async (c) => {
+  const token = c.req.header('Authorization')?.replace('Bearer ', '')
+  const me = await getUser(c.env.DB, token || '') as any
+  if (!me || !isAdmin(me)) return c.json({ error: 'Forbidden' }, 403)
+  const body = await c.req.json()
+  for (const [key, value] of Object.entries(body)) {
+    await c.env.DB.prepare(
+      'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value'
+    ).bind(key, value).run()
+  }
   return c.json({ ok: true })
 })
 
@@ -225,6 +257,7 @@ function formatAlert(a: any) {
     buyDate: a.buy_date,
     closeDate: a.close_date,
     created: a.created,
+    updatedAt: a.updated_at || null,
   }
 }
 

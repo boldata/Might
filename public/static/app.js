@@ -54,10 +54,12 @@ let STATE = {
   currentUser: null,
   alerts: [],
   allUsers: [],
+  pricing: null,
   loading: true,
   authMode: 'login',
   tab: 'dashboard',
   adminTab: 'dashboard',
+  adminAnalyticsTab: 'overview',
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -144,7 +146,7 @@ function render() {
     attachAuthEvents();
     return;
   }
-  if (STATE.currentUser.role === 'admin') {
+  if (STATE.currentUser.role === 'admin' || STATE.currentUser.role === 'manager') {
     root.innerHTML = renderAdminApp();
     attachAdminEvents();
   } else {
@@ -170,12 +172,21 @@ async function init() {
 }
 
 async function loadData() {
-  const [alertsData, usersData] = await Promise.all([
+  const isAdminOrMgr = STATE.currentUser?.role === 'admin' || STATE.currentUser?.role === 'manager';
+  const [alertsData, usersData, pricingData] = await Promise.all([
     API.get('/api/alerts'),
-    STATE.currentUser?.role === 'admin' ? API.get('/api/users') : Promise.resolve({ users: [] }),
+    isAdminOrMgr ? API.get('/api/users') : Promise.resolve({ users: [] }),
+    API.get('/api/pricing').catch(() => ({ pricing: {} })),
   ]);
   STATE.alerts   = alertsData.alerts  || [];
   STATE.allUsers = usersData.users    || [];
+  // Merge DB pricing into TIERS if available
+  const p = pricingData.pricing || {};
+  if (p.price_trader) TIERS.trader.price = parseFloat(p.price_trader);
+  if (p.price_elite)  TIERS.elite.price  = parseFloat(p.price_elite);
+  if (p.name_trader)  TIERS.trader.label = p.name_trader;
+  if (p.name_elite)   TIERS.elite.label  = p.name_elite;
+  STATE.pricing = p;
 }
 
 // ─── AUTH PAGE ────────────────────────────────────────────────────────────────
@@ -530,19 +541,13 @@ function renderSubscriberDashboard() {
   ${unsub ? renderUnsubscribedBanner() : ''}
   ${cancelled && !unsub ? renderCancelledBanner() : ''}
 
-  <!-- Stats row -->
+  <!-- KPI Stats row -->
   <div style="display:flex;gap:14px;margin-bottom:22px;flex-wrap:wrap;">
-    ${[
-      ['Open Trades',    locked ? '—' : active.length, locked ? 'subscribe to unlock' : 'currently active',     C.activeText],
-      ['Closed Trades',  closed.length + stopped.length, '2026 total',                                           '#1A7A50'],
-      ['Win Rate',       `${winRate}%`,  `${closed.filter(a=>a.pnl?.startsWith('+')).length} of ${closed.length} wins`, C.accent],
-      ['Avg Hold',       avgDays ? `${avgDays}d` : '—', 'days per trade',                                        '#9B8570'],
-    ].map(([l,v,s,c]) => `
-    <div class="stat-card">
-      <div style="font-size:10px;letter-spacing:0.09em;color:rgba(90,45,25,0.60);text-transform:uppercase;margin-bottom:5px;font-weight:700;">${l}</div>
-      <div style="font-size:28px;font-weight:800;color:${c};letter-spacing:-1px;">${v}</div>
-      <div style="font-size:11px;color:rgba(90,45,25,0.55);margin-top:4px;">${s}</div>
-    </div>`).join('')}
+    ${renderKpiCard('📈','Open Trades', locked ? '—' : active.length, locked ? 'subscribe to unlock' : 'currently active', C.activeText)}
+    ${renderKpiCard('✅','Closed Trades', closed.length + stopped.length, '2026 total', '#1A7A50')}
+    ${renderKpiCard('🏆','Win Rate', winRate+'%', closed.filter(a=>a.pnl?.startsWith('+')).length+' of '+closed.length+' wins', C.accent)}
+    ${renderKpiCard('⏱','Avg Hold', avgDays ? avgDays+'d' : '—', 'days per trade', '#9B8570')}
+    ${(() => { const pnls = [...closed,...stopped].map(a => parseFloat(a.pnl)).filter(n => !isNaN(n)); const avgR = pnls.length ? (pnls.reduce((a,b)=>a+b,0)/pnls.length).toFixed(1)+'%' : '—'; return renderKpiCard('💰','Avg Return', avgR, 'avg P&L per trade', '#1A7A50'); })()}
   </div>
 
   <!-- 2-col grid -->
@@ -597,30 +602,44 @@ function renderSubscriberDashboard() {
 </div>`;
 }
 
+// ─── KPI Card helper ─────────────────────────────────────────────────────────
+function renderKpiCard(icon, label, value, sub, color) {
+  return `<div class="stat-card" style="position:relative;overflow:hidden;">
+  <div style="position:absolute;top:-10px;right:-10px;width:60px;height:60px;border-radius:50%;background:${color}18;pointer-events:none;"></div>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+    <div style="width:30px;height:30px;border-radius:9px;background:${color}15;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;">${icon}</div>
+    <div style="font-size:10px;letter-spacing:0.08em;color:rgba(90,45,25,0.60);text-transform:uppercase;font-weight:700;">${label}</div>
+  </div>
+  <div style="font-size:26px;font-weight:900;color:${color};letter-spacing:-1px;margin-bottom:3px;">${value}</div>
+  <div style="font-size:11px;color:rgba(90,45,25,0.50);">${sub}</div>
+</div>`;
+}
+
 function renderOpenPositionCard(a) {
   const days = daysToClose(a.buyDate, null);
   const saved = (STATE.currentUser?.watchlist || []).includes(a.id);
+  const isUpdated = a.updatedAt && a.updatedAt !== a.created;
   return `
-<div class="pos-card" style="cursor:default;margin-bottom:12px;background:#fff;border-radius:22px;padding:16px 16px 14px;border:1px solid rgba(220,218,214,0.70);box-shadow:0 3px 16px rgba(80,70,60,0.10);position:relative;">
+<div class="pos-card" onclick="openAlertModal(${a.id})" style="cursor:pointer;margin-bottom:16px;background:#fff;border-radius:22px;padding:16px 16px 14px;border:1px solid rgba(220,218,214,0.70);box-shadow:0 3px 16px rgba(80,70,60,0.10);position:relative;">
   <!-- Top row: ticker + days -->
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-    <span style="font-weight:900;font-size:22px;color:#0F1E2E;letter-spacing:-0.5px;" onclick="openAlertModal(${a.id})" style="cursor:pointer;">${a.ticker}</span>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="font-weight:900;font-size:22px;color:#0F1E2E;letter-spacing:-0.5px;">${a.ticker}</span>
+      ${isUpdated ? `<span style="font-size:9px;font-weight:700;color:#E8663A;background:rgba(232,102,58,0.10);border:1px solid rgba(232,102,58,0.25);border-radius:20px;padding:2px 7px;">UPDATED ${fmtDate(a.updatedAt)}</span>` : ''}
+    </div>
     <span style="font-size:12px;color:#9A9189;font-weight:500;">${days !== null ? days+'d' : ''}&nbsp;·&nbsp;${fmtDate(a.buyDate)}</span>
   </div>
   <!-- Three large pill capsules matching reference design -->
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:0;">
-    <!-- ENTRY: amber/orange gradient -->
-    <div onclick="openAlertModal(${a.id})" style="cursor:pointer;background:linear-gradient(135deg,#F5B942 0%,#E8883A 100%);border-radius:50px;padding:13px 10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;">
+    <div style="background:linear-gradient(135deg,#F5B942 0%,#E8883A 100%);border-radius:50px;padding:13px 10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;">
       <span style="font-size:9px;color:#0F1E2E;font-weight:800;text-transform:uppercase;letter-spacing:0.10em;opacity:0.75;">Entry</span>
       <span style="font-size:16px;font-weight:900;color:#0F1E2E;letter-spacing:-0.3px;">$${a.entry}</span>
     </div>
-    <!-- TARGET: solid green -->
-    <div onclick="openAlertModal(${a.id})" style="cursor:pointer;background:linear-gradient(135deg,#3DB870 0%,#229954 100%);border-radius:50px;padding:13px 10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;">
+    <div style="background:linear-gradient(135deg,#3DB870 0%,#229954 100%);border-radius:50px;padding:13px 10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;">
       <span style="font-size:9px;color:#fff;font-weight:800;text-transform:uppercase;letter-spacing:0.10em;opacity:0.85;">Target</span>
       <span style="font-size:16px;font-weight:900;color:#fff;letter-spacing:-0.3px;">$${a.t1}</span>
     </div>
-    <!-- STOP: solid red -->
-    <div onclick="openAlertModal(${a.id})" style="cursor:pointer;background:linear-gradient(135deg,#F05050 0%,#C0302A 100%);border-radius:50px;padding:13px 10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;">
+    <div style="background:linear-gradient(135deg,#F05050 0%,#C0302A 100%);border-radius:50px;padding:13px 10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;">
       <span style="font-size:9px;color:#fff;font-weight:800;text-transform:uppercase;letter-spacing:0.10em;opacity:0.85;">Stop</span>
       <span style="font-size:16px;font-weight:900;color:#fff;letter-spacing:-0.3px;">$${a.sl}</span>
     </div>
@@ -633,10 +652,7 @@ function renderOpenPositionCard(a) {
       <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
     </svg>
   </button>
-</div>`;
-}
-
-// add bottom margin to last card to account for floating thumbs-up
+</div>`;\n}
 
 
 function renderCancelledBanner() {
@@ -733,57 +749,44 @@ function updateSearch(val) {
 }
 
 function renderAlertCard(a, isNew) {
-  const u     = STATE.currentUser;
-  const saved = u.watchlist?.includes(a.id);
-  const days  = daysToClose(a.buyDate, a.closeDate);
-  const tierInfo = TIERS[a.tier];
+  const u        = STATE.currentUser;
+  const saved    = u.watchlist?.includes(a.id);
+  const days     = daysToClose(a.buyDate, a.closeDate);
+  const isUpdated= a.updatedAt && a.updatedAt !== a.created;
+  // Match open-position card layout exactly — single line, pill capsules
   return `
-<div class="alert-card" onclick="openAlertModal(${a.id})" style="${glass}border-radius:20px;padding:20px;cursor:pointer;transition:all 0.2s;border-left:4px solid ${statusColor(a.status)};position:relative;overflow:hidden;">
-  <!-- Subtle gradient shimmer -->
-  <div style="position:absolute;top:0;right:0;width:120px;height:120px;background:radial-gradient(circle,rgba(232,102,58,0.07) 0%,transparent 70%);pointer-events:none;"></div>
-  ${isNew ? `<div class="pulse-dot" style="position:absolute;top:15px;right:15px;width:9px;height:9px;border-radius:50%;background:linear-gradient(135deg,#E8663A,#D95F7A);box-shadow:0 0 0 3px rgba(253,235,220,0.85);" title="New alert"></div>` : ''}
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:11px;">
-    <div>
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
-        <span style="font-weight:800;font-size:18px;color:#2C1810;letter-spacing:-0.3px;">${a.ticker}</span>
-        <span style="${badgeStyle(tierInfo?.color||'#9B8570', tierInfo?.bg||'rgba(220,180,150,0.5)')}">${tierInfo?.label||a.tier}</span>
-      </div>
-      <div style="font-size:12px;color:#9B8570;">${a.category}</div>
+<div class="pos-card" onclick="openAlertModal(${a.id})" style="cursor:pointer;background:#fff;border-radius:22px;padding:14px 14px 12px;border:1px solid rgba(220,218,214,0.70);border-left:4px solid ${statusColor(a.status)};box-shadow:0 3px 16px rgba(80,70,60,0.10);position:relative;">
+  ${isNew ? `<div class="pulse-dot" style="position:absolute;top:10px;right:10px;width:8px;height:8px;border-radius:50%;background:#E8663A;box-shadow:0 0 0 3px rgba(232,102,58,0.20);"></div>` : ''}
+  <!-- Single line: ticker · days · date | status + like -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:6px;">
+    <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;">
+      <span style="font-weight:900;font-size:18px;color:#0F1E2E;letter-spacing:-0.4px;">${a.ticker}</span>
+      <span style="font-size:11px;color:#9A9189;">${days !== null ? days+'d' : ''} · ${fmtDate(a.buyDate)}</span>
+      ${isUpdated ? `<span style="font-size:9px;font-weight:700;color:#E8663A;background:rgba(232,102,58,0.10);border:1px solid rgba(232,102,58,0.25);border-radius:20px;padding:2px 7px;">UPDATED ${fmtDate(a.updatedAt)}</span>` : ''}
     </div>
-    <div style="display:flex;gap:6px;align-items:center;">
-      <span style="${badgeStyle(statusColor(a.status), statusBg(a.status))}">${a.status}</span>
-      <span style="${badgeStyle(priorityColor(a.priority), C.chipBg)}">${a.priority}</span>
-      <button onclick="event.stopPropagation();toggleWatchlist(${a.id})" title="${saved?'Unlike':'Like'}" style="background:none;border:none;cursor:pointer;font-size:20px;line-height:1;padding:2px 4px;color:${saved?'#D95F7A':'rgba(180,110,90,0.4)'};transition:all 0.18s;transform:${saved?'scale(1.1)':'scale(1)'};filter:${saved?'drop-shadow(0 0 6px rgba(217,95,122,0.45))':'none'};">
-        ${saved ? '♥' : '♡'}
-      </button>
+    <div style="display:flex;gap:5px;align-items:center;">
+      <span style="${badgeStyle(statusColor(a.status), statusBg(a.status))}font-size:9px;">${a.status}</span>
+      <button onclick="event.stopPropagation();toggleWatchlist(${a.id})" title="${saved?'Unlike':'Like'}" style="background:none;border:none;cursor:pointer;font-size:18px;line-height:1;padding:1px 3px;color:${saved?'#E8663A':'rgba(180,110,90,0.35)'};transition:all 0.18s;">${saved ? '♥' : '♡'}</button>
     </div>
   </div>
-  <div style="font-size:14px;font-weight:700;margin-bottom:5px;color:#2C1810;">${a.title}</div>
-  <div style="font-size:12px;color:rgba(90,45,25,0.65);margin-bottom:14px;line-height:1.6;">${a.description}</div>
-  <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
-    <div style="background:rgba(255,200,170,0.55);border:1px solid rgba(220,160,130,0.35);border-radius:8px;padding:5px 11px;font-size:11px;">
-      <span style="color:#9B8570;font-weight:700;">ENTRY DATE </span>
-      <span style="color:#2C1810;font-weight:700;">${fmtDate(a.buyDate)}</span>
+  <!-- Three large pill capsules — same style as dashboard open alerts -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+    <div style="background:linear-gradient(135deg,#F5B942 0%,#E8883A 100%);border-radius:50px;padding:11px 8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;">
+      <span style="font-size:8px;color:#0F1E2E;font-weight:800;text-transform:uppercase;letter-spacing:0.10em;opacity:0.75;">Entry</span>
+      <span style="font-size:14px;font-weight:900;color:#0F1E2E;">$${a.entry}</span>
     </div>
-    ${days !== null ? `<div style="background:${a.status==='active'?C.activeBg:a.pnl?.startsWith('+')?'rgba(180,248,210,0.55)':C.stoppedBg};border:1px solid rgba(220,160,130,0.30);border-radius:8px;padding:5px 11px;font-size:11px;">
-      <span style="color:#9B8570;font-weight:700;">DAYS ${a.status==='active'?'OPEN':'TO CLOSE'} </span>
-      <span style="font-weight:700;color:${a.status==='active'?C.activeText:a.pnl?.startsWith('+')?'#1A7A50':C.stoppedText};">${days}d</span>
-    </div>` : ''}
+    <div style="background:linear-gradient(135deg,#3DB870 0%,#229954 100%);border-radius:50px;padding:11px 8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;">
+      <span style="font-size:8px;color:#fff;font-weight:800;text-transform:uppercase;letter-spacing:0.10em;opacity:0.85;">Target</span>
+      <span style="font-size:14px;font-weight:900;color:#fff;">$${a.t1}</span>
+    </div>
+    <div style="background:linear-gradient(135deg,#F05050 0%,#C0302A 100%);border-radius:50px;padding:11px 8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;">
+      <span style="font-size:8px;color:#fff;font-weight:800;text-transform:uppercase;letter-spacing:0.10em;opacity:0.85;">Stop</span>
+      <span style="font-size:14px;font-weight:900;color:#fff;">$${a.sl}</span>
+    </div>
   </div>
-  <!-- Entry / Target / Stop Loss -->
-  <div style="display:flex;gap:8px;margin-bottom:12px;">
-    ${[['Entry',a.entry,'#2C1810','rgba(253,235,220,0.70)'],['Target',a.t1,'#1A7A50','rgba(180,248,210,0.45)'],['Stop Loss',a.sl,'#C0302A','rgba(255,200,195,0.45)']].map(([l,v,cl,bg]) => `
-    <div style="background:${bg};backdrop-filter:blur(8px);border-radius:10px;padding:9px 10px;flex:1;text-align:center;border:1px solid rgba(220,160,130,0.30);">
-      <div style="font-size:9px;color:rgba(90,45,25,0.60);font-weight:700;text-transform:uppercase;letter-spacing:0.08em;">${l}</div>
-      <div style="font-size:15px;font-weight:800;color:${cl};margin-top:2px;">$${v}</div>
-    </div>`).join('')}
-  </div>
-  <div style="display:flex;justify-content:flex-end;">
-    <span style="font-size:15px;font-weight:800;color:${a.pnl?.startsWith('+')?'#1A7A50':'#C0302A'};">${a.pnl}</span>
-  </div>
+  ${a.pnl && a.pnl !== '0%' ? `<div style="display:flex;justify-content:flex-end;margin-top:7px;"><span style="font-size:13px;font-weight:800;color:${a.pnl.startsWith('+')?'#1A7A50':'#C0302A'};">${a.pnl}</span></div>` : ''}
 </div>`;
 }
-
 async function toggleWatchlist(id) {
   const u  = STATE.currentUser;
   const wl = u.watchlist?.includes(id) ? u.watchlist.filter(x => x !== id) : [...(u.watchlist || []), id];
@@ -822,41 +825,63 @@ function renderGantt(alerts) {
 
   const barColor = (a) => a.status === 'active' ? '#1A6FAD' : a.status === 'closed' ? '#1A7A50' : '#C0302A';
 
+  // Only show months from earliest alert to today
+  const allMonths = alerts.map(a => getMonthIdx(a.buyDate) ?? 0);
+  const minMonth = Math.min(...allMonths, TODAY_MONTH);
+  const maxMonth = TODAY_MONTH;
+  const visibleMonths = MONTHS.slice(minMonth, maxMonth + 1);
+  const totalCols = Math.max(visibleMonths.length, 1);
+
   return `
 <div style="overflow-x:auto;">
-  <div style="min-width:700px;">
-    <div style="display:grid;grid-template-columns:80px repeat(12,1fr);margin-bottom:10px;">
-      <div></div>
-      ${MONTHS.map((m, i) => `<div style="font-size:10px;color:${i===TODAY_MONTH?'#E8663A':'#9B8570'};text-align:center;font-weight:${i===TODAY_MONTH?800:500};position:relative;letter-spacing:0.04em;">
-        ${m}${i===TODAY_MONTH?`<div style="position:absolute;bottom:-5px;left:50%;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:#E8663A;box-shadow:0 0 6px rgba(232,102,58,0.55);"></div>`:''}
-      </div>`).join('')}
+  <div style="min-width:560px;">
+    <!-- Month header row -->
+    <div style="display:grid;grid-template-columns:90px repeat(${totalCols},1fr);margin-bottom:10px;gap:2px;align-items:end;">
+      <div style="font-size:9px;color:rgba(90,45,25,0.45);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;padding-bottom:6px;">Ticker</div>
+      ${visibleMonths.map((m, i) => {
+        const mIdx = i + minMonth;
+        const isCur = mIdx === TODAY_MONTH;
+        return `<div style="font-size:10px;color:${isCur?'#E8663A':'#9B8570'};text-align:center;font-weight:${isCur?800:500};letter-spacing:0.04em;padding-bottom:6px;border-bottom:2px solid ${isCur?'#E8663A':'rgba(220,160,130,0.22)'};">${m}${isCur?'▼':''}</div>`;
+      }).join('')}
     </div>
+    <!-- Alert rows -->
     ${alerts.map(a => {
       const buyM   = getMonthIdx(a.buyDate) ?? 0;
       const rawEnd = a.status === 'active' ? TODAY_MONTH : (a.closeDate ? getMonthIdx(a.closeDate) : TODAY_MONTH);
       const endM   = Math.min(rawEnd, TODAY_MONTH);
-      const left   = (buyM / 12) * 100;
-      const width  = Math.max(((endM - buyM + 1) / 12) * 100, 2);
-      const days   = daysToClose(a.buyDate, a.closeDate);
+      const clampedBuy = Math.max(buyM, minMonth);
+      const leftCols   = clampedBuy - minMonth;
+      const spanCols   = Math.max(endM - clampedBuy + 1, 1);
+      const days = daysToClose(a.buyDate, a.closeDate);
+      const pnlStr = a.pnl && a.pnl !== '0%' ? ' · ' + a.pnl : '';
       return `
-<div style="display:grid;grid-template-columns:80px 1fr;margin-bottom:13px;align-items:center;">
-  <div style="font-size:11px;font-weight:700;color:#2C1810;letter-spacing:-0.2px;">${a.ticker}</div>
-  <div style="position:relative;height:24px;background:rgba(220,160,130,0.20);border-radius:20px;">
-    <div class="gantt-bar" style="position:absolute;left:${left}%;width:${width}%;height:100%;background:${barColor(a)};border-radius:20px;opacity:0.88;min-width:22px;display:flex;align-items:center;padding-left:8px;gap:6px;">
-      <span style="font-size:10px;color:#fff;font-weight:700;white-space:nowrap;">$${a.entry}</span>
-      ${a.status !== 'active' && days ? `<span style="font-size:9px;color:rgba(255,255,255,0.85);white-space:nowrap;">${days}d</span>` : ''}
-    </div>
-    <div style="position:absolute;left:${(TODAY_MONTH/12)*100+4}%;top:0;height:100%;width:2px;background:#E8663A;opacity:0.75;border-radius:1px;box-shadow:0 0 6px rgba(232,102,58,0.4);"></div>
+<div style="display:grid;grid-template-columns:90px repeat(${totalCols},1fr);margin-bottom:8px;gap:2px;align-items:center;">
+  <div style="display:flex;flex-direction:column;padding-right:6px;">
+    <span style="font-size:12px;font-weight:800;color:#2C1810;letter-spacing:-0.2px;">${a.ticker}</span>
+    <span style="font-size:9px;color:#9B8570;">${a.entry ? '$'+a.entry : ''}</span>
   </div>
+  ${Array.from({length:totalCols}).map((_,ci) => {
+    const inBar  = ci >= leftCols && ci < leftCols + spanCols;
+    const isFirst= ci === leftCols;
+    const isLast = ci === leftCols + spanCols - 1;
+    if (!inBar) return `<div style="height:30px;background:rgba(220,160,130,0.10);border-radius:4px;"></div>`;
+    const rLeft  = isFirst ? '10px 0 0 10px' : '0';
+    const rRight = isLast  ? '0 10px 10px 0' : '0';
+    return `<div style="height:30px;background:${barColor(a)};border-radius:${isFirst?'10px 0 0 10px':'0'} ${isLast?'10px 10px':'0 0'} ${isFirst&&isLast?'10px':'0'};display:flex;align-items:center;padding:0 7px;overflow:hidden;justify-content:${isFirst?'flex-start':'flex-end'};">
+      ${isFirst && spanCols > 1 ? `<span style="font-size:9px;color:#fff;font-weight:700;white-space:nowrap;opacity:0.95;">${days ? days+'d' : ''}</span>` : ''}
+      ${isLast && a.status !== 'active' && pnlStr ? `<span style="font-size:9px;color:rgba(255,255,255,0.92);white-space:nowrap;font-weight:700;">${pnlStr}</span>` : ''}
+    </div>`;
+  }).join('')}
 </div>`;
     }).join('')}
-    <div style="display:flex;gap:18px;margin-top:16px;flex-wrap:wrap;align-items:center;">
-      ${[['#1A6FAD','Active (open)'],['#1A7A50','Profitable'],['#C0302A','Stop Loss']].map(([c,l]) =>
+    <!-- Legend -->
+    <div style="display:flex;gap:18px;margin-top:16px;padding-top:12px;border-top:1px solid rgba(220,160,130,0.22);flex-wrap:wrap;align-items:center;">
+      ${[['#1A6FAD','Active'],['#1A7A50','Closed (profit)'],['#C0302A','Stop Loss']].map(([c,l]) =>
         `<div style="display:flex;align-items:center;gap:7px;font-size:11px;color:#9B8570;">
-          <div style="width:22px;height:8px;background:${c};border-radius:4px;"></div>${l}
+          <div style="width:24px;height:10px;background:${c};border-radius:5px;"></div>${l}
         </div>`).join('')}
-      <div style="display:flex;align-items:center;gap:7px;font-size:11px;color:#E8663A;">
-        <div style="width:2px;height:16px;background:#E8663A;border-radius:1px;box-shadow:0 0 4px rgba(232,102,58,0.4);"></div>Today
+      <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#E8663A;font-weight:700;">
+        ▼ Today (${MONTHS[TODAY_MONTH]})
       </div>
     </div>
   </div>
@@ -1124,17 +1149,20 @@ function attachSubscriberEvents() {
 function renderAdminApp() {
   const u   = STATE.currentUser;
   const tab = STATE.adminTab;
+  const isAdminRole = u.role === 'admin';
   const adminTabs = [['dashboard','Dashboard'],['alerts','Alerts'],['users','Users'],['analytics','Analytics'],['account','My Account']];
 
   const navActive   = `background:linear-gradient(135deg,rgba(232,102,58,0.25),rgba(217,95,122,0.18));color:#2C1810;border:1px solid rgba(232,102,58,0.30);backdrop-filter:blur(8px);`;
   const navInactive = `background:transparent;color:rgba(90,45,25,0.80);border:1px solid transparent;`;
+  const roleLabel   = isAdminRole ? 'ADMIN' : 'MANAGER';
+  const roleColor   = isAdminRole ? '#E8663A' : '#1A6FAD';
 
   return `
 <div style="${appBg}min-height:100vh;color:#2C1810;font-family:'Inter','Georgia',sans-serif;">
   <nav style="${navBg}padding:0 28px;display:flex;align-items:center;justify-content:space-between;height:66px;position:sticky;top:0;z-index:100;box-shadow:0 2px 16px rgba(120,110,98,0.18);">
     <div style="display:flex;align-items:center;gap:9px;flex-shrink:0;">
       <div style="width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#E8663A,#D95F7A);display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:900;box-shadow:0 3px 12px rgba(232,102,58,0.4);">▲</div>
-      <span style="font-size:18px;font-weight:800;color:#2C1810;letter-spacing:-0.5px;">SignalStack <span style="font-size:12px;font-weight:600;color:#E8663A;letter-spacing:0.02em;">ADMIN</span></span>
+      <span style="font-size:18px;font-weight:800;color:#2C1810;letter-spacing:-0.5px;">SignalStack <span style="font-size:12px;font-weight:600;color:${roleColor};letter-spacing:0.02em;">${roleLabel}</span></span>
     </div>
     <div style="display:flex;gap:3px;" class="nav-links">
       ${adminTabs.map(([k,l]) => `<button onclick="setAdminTab('${k}')" style="padding:7px 16px;border-radius:10px;cursor:pointer;font-size:13px;font-family:'Inter',sans-serif;font-weight:600;transition:all 0.18s;${tab===k?navActive:navInactive}">${l}</button>`).join('')}
@@ -1142,7 +1170,7 @@ function renderAdminApp() {
     <div style="display:flex;gap:10px;align-items:center;">
       <div style="font-size:12px;text-align:right;">
         <div style="font-weight:700;color:#2C1810;font-size:13px;">${u.name}</div>
-        <div style="color:#E8663A;font-weight:700;font-size:11px;letter-spacing:0.04em;">ADMIN</div>
+        <div style="color:${roleColor};font-weight:700;font-size:11px;letter-spacing:0.04em;">${roleLabel}</div>
       </div>
       <div style="width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#E8663A,#C9481E);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;box-shadow:0 2px 10px rgba(232,102,58,0.35);">${u.name.charAt(0)}</div>
       <button onclick="handleLogout()" style="${btnStyle('ghost')}font-size:12px;padding:7px 13px;">Sign Out</button>
@@ -1161,11 +1189,11 @@ function renderAdminApp() {
   <div id="admin-generic-overlay"style="display:none;" class="modal-overlay" onclick="closeAdminGenericModal()"><div id="admin-generic-content" onclick="event.stopPropagation()"></div></div>
 </div>`;
 }
-
 function setAdminTab(t) { STATE.adminTab = t; render(); }
 
 function getAdminStats() {
   const subs      = STATE.allUsers.filter(u => u.role === 'subscriber');
+  const managers  = STATE.allUsers.filter(u => u.role === 'manager');
   const traderCount = subs.filter(u => u.tier === 'trader' && u.subscriptionStatus === 'active').length;
   const eliteCount  = subs.filter(u => u.tier === 'elite'  && u.subscriptionStatus === 'active').length;
   const cancelCount = subs.filter(u => u.subscriptionStatus === 'cancelled').length;
@@ -1174,7 +1202,7 @@ function getAdminStats() {
   const closedAlerts = STATE.alerts.filter(a => a.status === 'closed');
   const closedWins   = closedAlerts.filter(a => a.pnl?.startsWith('+')).length;
   const winRate = closedAlerts.length ? Math.round(closedWins / closedAlerts.length * 100) : 0;
-  return { subs, traderCount, eliteCount, cancelCount, revenue, activeAlerts, closedWins, closedTotal: closedAlerts.length, winRate };
+  return { subs, managers, traderCount, eliteCount, cancelCount, revenue, activeAlerts, closedWins, closedTotal: closedAlerts.length, winRate };
 }
 
 function renderAdminDashboard() {
@@ -1299,26 +1327,58 @@ function renderAdminAlerts() {
 }
 
 function renderAdminUsers() {
+  const me = STATE.currentUser;
+  const isAdminRole = me.role === 'admin';
+  const subscribers = STATE.allUsers.filter(u => u.role === 'subscriber');
+  const managers    = STATE.allUsers.filter(u => u.role === 'manager');
+
+  const roleColor = (r) => r === 'admin' ? '#B84A18' : r === 'manager' ? '#1A6FAD' : '#1A7A50';
+  const roleBg    = (r) => r === 'admin' ? 'rgba(255,210,185,0.65)' : r === 'manager' ? 'rgba(180,220,255,0.55)' : 'rgba(180,248,210,0.55)';
+
   return `
 <div class="fade-in">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:22px;">
     <div>
       <h1 style="font-size:28px;font-weight:800;color:#2C1810;letter-spacing:-0.8px;margin-bottom:5px;">User Management</h1>
-      <p style="font-size:13px;color:rgba(90,45,25,0.65);">${STATE.allUsers.length} total accounts</p>
+      <p style="font-size:13px;color:rgba(90,45,25,0.65);">${STATE.allUsers.length} total accounts · ${managers.length} manager${managers.length!==1?'s':''}</p>
     </div>
-    <button onclick="openUserForm()" class="btn-glow" style="${btnStyle('primary')}">+ Add User</button>
+    <div style="display:flex;gap:8px;">
+      ${isAdminRole ? `<button onclick="openManagerForm()" style="${btnStyle('secondary')}">+ Add Manager</button>` : ''}
+      <button onclick="openUserForm()" class="btn-glow" style="${btnStyle('primary')}">+ Add User</button>
+    </div>
   </div>
+  ${isAdminRole && managers.length > 0 ? `
+  <div style="${cardStyle}margin-bottom:18px;border-left:4px solid #1A6FAD;">
+    <h3 style="font-size:14px;font-weight:700;color:#2C1810;margin-bottom:14px;display:flex;align-items:center;gap:8px;">
+      <span style="${badgeStyle('#1A6FAD','rgba(180,220,255,0.55)')}">MANAGER</span> Manager Accounts
+    </h3>
+    <div style="overflow-x:auto;">
+      <table style="${tableStyle}">
+        <thead><tr>${['Name / Email','Joined','Actions'].map(h => `<th style="${thStyle}">${h}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${managers.map(u => `<tr>
+            <td style="${tdStyle}"><div style="display:flex;gap:9px;align-items:center;">
+              <div style="width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,#1A6FAD,#1A4FAD);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">${u.name.charAt(0)}</div>
+              <div><div style="font-weight:700;font-size:13px;color:#2C1810;">${u.name}</div><div style="font-size:11px;color:#9B8570;">${u.email}</div></div>
+            </div></td>
+            <td style="${tdStyle}font-size:11px;color:#9B8570;">${u.joined}</td>
+            <td style="${tdStyle}"><button onclick="deleteUser(${u.id})" style="${btnStyle('danger')}padding:4px 8px;font-size:11px;">Remove</button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>` : ''}
   <div style="${cardStyle}">
     <div style="overflow-x:auto;">
       <table style="${tableStyle}">
         <thead><tr>${['Name / Email','Role','Tier','Status','Joined','Watchlist','Actions'].map(h => `<th style="${thStyle}">${h}</th>`).join('')}</tr></thead>
         <tbody>
-          ${STATE.allUsers.map(u => `<tr>
+          ${STATE.allUsers.filter(u => u.role !== 'manager').map(u => `<tr>
             <td style="${tdStyle}"><div style="display:flex;gap:9px;align-items:center;">
               <div style="width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,#E8663A,#D95F7A);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">${u.name.charAt(0)}</div>
               <div><div style="font-weight:700;font-size:13px;color:#2C1810;">${u.name}</div><div style="font-size:11px;color:#9B8570;">${u.email}</div></div>
             </div></td>
-            <td style="${tdStyle}"><span style="${badgeStyle(u.role==='admin'?'#B84A18':'#1A7A50',u.role==='admin'?'rgba(255,210,185,0.65)':'rgba(180,248,210,0.55)')}">${u.role}</span></td>
+            <td style="${tdStyle}"><span style="${badgeStyle(roleColor(u.role),roleBg(u.role))}">${u.role}</span></td>
             <td style="${tdStyle}">${u.tier ? `<span style="${badgeStyle(TIERS[u.tier]?.color||'#9B8570',TIERS[u.tier]?.bg||'rgba(220,180,150,0.5)')}font-size:9px;">${u.tier}</span>` : '<span style="color:#9B8570;font-size:13px;">—</span>'}</td>
             <td style="${tdStyle}"><span style="${badgeStyle(u.subscriptionStatus==='cancelled'?'#C0302A':u.subscriptionStatus==='unsubscribed'?'#9B8570':'#1A7A50',u.subscriptionStatus==='cancelled'?'rgba(255,200,195,0.65)':u.subscriptionStatus==='unsubscribed'?'rgba(220,180,150,0.35)':'rgba(180,248,210,0.55)')}">${u.subscriptionStatus||'active'}</span></td>
             <td style="${tdStyle}font-size:11px;color:#9B8570;">${u.joined}</td>
@@ -1342,12 +1402,25 @@ function renderAdminUsers() {
   </div>
 </div>`;
 }
-
 function renderAdminAnalytics() {
   const s = getAdminStats();
+  const me = STATE.currentUser;
+  const isAdminRole = me.role === 'admin';
+  const subTab = STATE.adminAnalyticsTab;
+
+  const subTabBtn = (k, l) => `<button onclick="setAnalyticsTab('${k}')" style="padding:7px 16px;border-radius:10px;cursor:pointer;font-size:13px;font-family:'Inter',sans-serif;font-weight:600;transition:all 0.18s;${subTab===k?`background:linear-gradient(135deg,rgba(232,102,58,0.22),rgba(217,95,122,0.16));color:#C9481E;border:1px solid rgba(232,102,58,0.32);`:`background:transparent;color:rgba(90,45,25,0.75);border:1px solid transparent;`}">${l}</button>`;
+
   return `
 <div class="fade-in">
-  <h1 style="font-size:28px;font-weight:800;color:#2C1810;letter-spacing:-0.8px;margin-bottom:22px;">Analytics</h1>
+  <h1 style="font-size:28px;font-weight:800;color:#2C1810;letter-spacing:-0.8px;margin-bottom:16px;">Analytics</h1>
+  <!-- Sub-tab bar -->
+  <div style="display:flex;gap:3px;background:rgba(253,220,200,0.35);border-radius:12px;padding:3px;border:1px solid rgba(220,160,130,0.25);margin-bottom:24px;width:fit-content;">
+    ${subTabBtn('overview','Overview')}
+    ${subTabBtn('timeline','Trade Timeline')}
+    ${isAdminRole ? subTabBtn('pricing','Pricing Management') : ''}
+  </div>
+
+  ${subTab === 'overview' ? `
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:20px;" class="grid-2">
     <!-- Revenue by Tier -->
     <div style="${cardStyle}">
@@ -1400,6 +1473,7 @@ function renderAdminAnalytics() {
       ${[
         ['Active Trader',  s.traderCount,                                                       TIERS.trader.color],
         ['Active Elite',   s.eliteCount,                                                        TIERS.elite.color],
+        ['Managers',       s.managers.length,                                                   '#1A6FAD'],
         ['Cancelled',      s.cancelCount,                                                        '#C0302A'],
         ['Unsubscribed',   s.subs.filter(u=>u.subscriptionStatus==='unsubscribed').length,      '#9B8570'],
       ].map(([l,n,c]) => `
@@ -1423,18 +1497,88 @@ function renderAdminAnalytics() {
         <span style="font-size:13px;font-weight:800;color:#B84A18;">${(a.views||0).toLocaleString()} views</span>
       </div>`).join('')}
     </div>
-  </div>
-  <!-- Gantt -->
+  </div>` : ''}
+
+  ${subTab === 'timeline' ? `
   <div style="${cardStyle}">
     <h3 style="font-size:15px;font-weight:700;color:#2C1810;margin-bottom:5px;">Trade Timeline — 2026</h3>
     <p style="font-size:12px;color:rgba(90,45,25,0.60);margin-bottom:18px;">All alerts · open trades capped at today</p>
     ${renderGantt(STATE.alerts)}
+  </div>` : ''}
+
+  ${subTab === 'pricing' && isAdminRole ? renderPricingManagement() : ''}
+</div>`;
+}
+
+function setAnalyticsTab(t) { STATE.adminAnalyticsTab = t; render(); }
+
+function renderPricingManagement() {
+  return `
+<div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+    <div>
+      <h2 style="font-size:20px;font-weight:800;color:#2C1810;margin-bottom:4px;">Pricing Management</h2>
+      <p style="font-size:13px;color:rgba(90,45,25,0.65);">Update subscription tier pricing and labels. Changes apply immediately.</p>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:22px;" class="grid-2">
+    ${Object.entries(TIERS).map(([key, t]) => `
+    <div style="${cardStyle}border-left:4px solid ${t.color};">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;">
+        <div style="width:40px;height:40px;border-radius:12px;background:${t.bg};display:flex;align-items:center;justify-content:center;font-size:20px;">${key==='elite'?'👑':'📊'}</div>
+        <div>
+          <div style="font-size:16px;font-weight:800;color:${t.color};">${t.label} Tier</div>
+          <div style="font-size:12px;color:#9B8570;">Current: $${t.price}/month</div>
+        </div>
+      </div>
+      <div style="margin-bottom:14px;"><label style="${labelStyle}">Tier Name</label><input id="pm-name-${key}" style="${inputStyle}" value="${t.label}" placeholder="e.g. ${t.label}"></div>
+      <div style="margin-bottom:18px;"><label style="${labelStyle}">Monthly Price ($)</label>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:18px;color:#9B8570;font-weight:700;">$</span>
+          <input id="pm-price-${key}" type="number" style="${inputStyle}flex:1;" value="${t.price}" min="1" step="1">
+          <span style="font-size:12px;color:#9B8570;white-space:nowrap;">/month</span>
+        </div>
+      </div>
+      <div id="pm-feedback-${key}" style="font-size:12px;font-weight:700;min-height:16px;margin-bottom:8px;"></div>
+      <button onclick="saveTierPricing('${key}')" class="btn-glow" style="${btnStyle('primary')}width:100%;justify-content:center;">💾 Save ${t.label} Pricing</button>
+    </div>`).join('')}
+  </div>
+  <div style="${cardStyle}border-left:4px solid #9B8570;">
+    <h3 style="font-size:14px;font-weight:700;color:#2C1810;margin-bottom:12px;">ℹ️ Pricing Notes</h3>
+    <ul style="font-size:13px;color:rgba(90,45,25,0.75);line-height:2.2;padding-left:18px;margin:0;">
+      <li>Price changes take effect immediately for all new subscriptions and display.</li>
+      <li>Existing active subscribers retain their current billing amount until manually updated.</li>
+      <li>MRR calculations on the Analytics overview use the latest prices.</li>
+      <li>The Terms &amp; Conditions subscription section references these prices.</li>
+    </ul>
   </div>
 </div>`;
 }
 
+async function saveTierPricing(key) {
+  const name  = document.getElementById('pm-name-'+key)?.value?.trim();
+  const price = parseFloat(document.getElementById('pm-price-'+key)?.value);
+  const fb    = document.getElementById('pm-feedback-'+key);
+  if (!name || isNaN(price) || price <= 0) {
+    if (fb) { fb.textContent = '⚠ Invalid name or price.'; fb.style.color = '#C0302A'; }
+    return;
+  }
+  try {
+    await API.put('/api/pricing', { ['name_'+key]: name, ['price_'+key]: price.toString() });
+    TIERS[key].label = name;
+    TIERS[key].price = price;
+    if (fb) { fb.textContent = '✓ Saved!'; fb.style.color = '#1A7A50'; }
+    setTimeout(() => render(), 1400);
+  } catch (e) {
+    if (fb) { fb.textContent = '✗ ' + (e.message || 'Save failed'); fb.style.color = '#C0302A'; }
+  }
+}
 function renderAdminAccount() {
   const u = STATE.currentUser;
+  const isAdminRole = u.role === 'admin';
+  const roleLabel = isAdminRole ? 'Admin' : 'Manager';
+  const roleColor = isAdminRole ? '#B84A18' : '#1A6FAD';
+  const roleBg    = isAdminRole ? 'rgba(255,210,185,0.65)' : 'rgba(180,220,255,0.55)';
   return `
 <div class="fade-in">
   <h1 style="font-size:28px;font-weight:800;color:#2C1810;letter-spacing:-0.8px;margin-bottom:26px;">My Account</h1>
@@ -1447,8 +1591,8 @@ function renderAdminAccount() {
           <div style="color:#9B8570;font-size:13px;margin-top:2px;">${u.email}</div>
           <div style="color:rgba(90,45,25,0.50);font-size:11px;margin-top:3px;">Member since ${u.joined}</div>
           <div style="display:flex;gap:7px;margin-top:10px;">
-            <span style="${badgeStyle('#B84A18','rgba(255,210,185,0.65)')}">Admin</span>
-            <span style="${badgeStyle('#1A7A50','rgba(180,248,210,0.55)')}">Active</span>
+            <span style="${badgeStyle(roleColor,roleBg)}">${roleLabel}</span>
+            <span style="${badgeStyle('#1A7A50','rgba(180,248,210,0.55)')}">${isAdminRole ? 'Full Access' : 'Limited Access'}</span>
           </div>
           <div id="admin-profile-feedback" style="font-size:12px;margin-top:7px;font-weight:700;color:#1A7A50;"></div>
         </div>
@@ -1462,7 +1606,6 @@ function renderAdminAccount() {
   </div>
 </div>`;
 }
-
 function showAdminEditPanel(type) {
   const panel   = document.getElementById('admin-edit-panel');
   const actions = document.getElementById('admin-profile-actions');
@@ -1694,6 +1837,48 @@ function selectUserTier(key) {
 }
 
 function closeUserForm() { const o = document.getElementById('user-form-overlay'); if (o) o.style.display = 'none'; }
+
+// ─── Manager Form Modal (admin only) ─────────────────────────────────────────
+function openManagerForm() {
+  const overlay = document.getElementById('user-form-overlay');
+  const content = document.getElementById('user-form-content');
+  if (!overlay || !content) return;
+  content.innerHTML = `
+  <div style="${glassHeavy}border-radius:24px;padding:30px;width:100%;max-width:460px;max-height:90vh;overflow:auto;border:1px solid rgba(255,200,175,0.55);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:22px;">
+      <h2 style="font-size:20px;font-weight:800;color:#2C1810;">Add Manager Account</h2>
+      <button onclick="closeUserForm()" style="${btnStyle('ghost')}padding:6px 10px;">✕</button>
+    </div>
+    <div style="margin-bottom:14px;padding:12px 16px;background:rgba(26,111,173,0.08);border-radius:10px;border:1px solid rgba(26,111,173,0.20);">
+      <p style="font-size:12px;color:#1A6FAD;margin:0;line-height:1.7;">Managers have access to alerts and user management but <strong>cannot</strong> create other managers, delete managers, or change pricing. Only admins can remove managers.</p>
+    </div>
+    <div style="margin-bottom:14px;"><label style="${labelStyle}">Full Name</label><input id="mf-name" style="${inputStyle}" placeholder="Manager full name"></div>
+    <div style="margin-bottom:14px;"><label style="${labelStyle}">Email</label><input id="mf-email" type="email" style="${inputStyle}" placeholder="manager@example.com"></div>
+    <div style="margin-bottom:20px;"><label style="${labelStyle}">Password</label><input id="mf-password" type="password" style="${inputStyle}" placeholder="••••••••"></div>
+    <div id="mf-error" style="display:none;color:#C0302A;font-size:12px;margin-bottom:12px;padding:8px 12px;background:rgba(255,200,195,0.65);border-radius:8px;"></div>
+    <div style="display:flex;gap:9px;justify-content:flex-end;">
+      <button onclick="closeUserForm()" style="${btnStyle('secondary')}">Cancel</button>
+      <button onclick="saveManagerForm()" class="btn-glow" style="${btnStyle('primary')}">Create Manager</button>
+    </div>
+  </div>`;
+  overlay.style.display = 'flex';
+}
+
+async function saveManagerForm() {
+  const errEl  = document.getElementById('mf-error');
+  const showErr= (m) => { if (errEl) { errEl.textContent = m; errEl.style.display = 'block'; } };
+  const name   = document.getElementById('mf-name')?.value?.trim();
+  const email  = document.getElementById('mf-email')?.value?.trim();
+  const pw     = document.getElementById('mf-password')?.value;
+  if (!name || !email) { showErr('Name and email required.'); return; }
+  if (pw && pw.length < 6) { showErr('Password must be at least 6 characters.'); return; }
+  try {
+    const { user } = await API.post('/api/users', { name, email, password: pw || 'manager123', tier: null, subscriptionStatus: 'active', role: 'manager' });
+    STATE.allUsers = [...STATE.allUsers, user];
+    closeUserForm();
+    render();
+  } catch (e) { showErr(e.message || 'Failed to create manager.'); }
+}
 
 async function saveUserForm() {
   const errEl  = document.getElementById('uf-error');
