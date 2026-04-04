@@ -652,7 +652,8 @@ function renderOpenPositionCard(a) {
       <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
     </svg>
   </button>
-</div>`;\n}
+</div>`;
+}
 
 
 function renderCancelledBanner() {
