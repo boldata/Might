@@ -1735,7 +1735,7 @@ function renderTierManagement() {
 
 async function toggleTierVisibility(tierId, visible) {
   try {
-    await API.put(\`/api/tiers/\${tierId}\`, { visible });
+    await API.put(`/api/tiers/${tierId}`, { visible });
     await loadData();
     render();
   } catch (e) {
@@ -1745,7 +1745,7 @@ async function toggleTierVisibility(tierId, visible) {
 
 async function markNotificationRead(notificationId) {
   try {
-    await API.put(\`/api/notifications/\${notificationId}\`, {});
+    await API.put(`/api/notifications/${notificationId}`, {});
     await loadData();
     render();
   } catch (e) {
