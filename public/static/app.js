@@ -26,12 +26,20 @@ const API = {
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-const TIERS = {
-  trader: { label: 'Trader', price: 229, color: '#B84A18', bg: 'rgba(255,210,185,0.65)', alerts: ['trader'] },
-  elite:  { label: 'Elite',  price: 769, color: '#6B2040', bg: 'rgba(200,140,160,0.45)', alerts: ['trader', 'elite'] },
+let TIERS = {
+  trader: { id: 'trader', label: 'Trader', price: 229, color: '#B84A18', bg: 'rgba(255,210,185,0.65)', order: 0, visible: true },
+  elite:  { id: 'elite', label: 'Elite', price: 769, color: '#6B2040', bg: 'rgba(200,140,160,0.45)', order: 1, visible: true },
+  prime:  { id: 'prime', label: 'Prime', price: 2800, color: '#8B6914', bg: 'rgba(255,235,180,0.55)', order: 2, visible: true },
+  exclusive: { id: 'exclusive', label: 'Exclusive', price: 12000, color: '#1A1A2E', bg: 'rgba(200,200,215,0.55)', order: 3, visible: true },
 };
-const TIER_ORDER = { trader: 0, elite: 1 };
-const canSeeAlert = (userTier, alertTier) => userTier && TIER_ORDER[userTier] >= TIER_ORDER[alertTier];
+
+const getTierOrder = (tierId) => TIERS[tierId]?.order ?? 999;
+const canSeeAlert = (userTier, alertTiers) => {
+  if (!userTier || !alertTiers) return false;
+  const userOrder = getTierOrder(userTier);
+  // User can see alert if ANY of the alert's tiers are at or below their tier level
+  return Array.isArray(alertTiers) ? alertTiers.some(t => getTierOrder(t) <= userOrder) : getTierOrder(alertTiers) <= userOrder;
+};
 
 const TODAY = new Date();
 const TODAY_MONTH = TODAY.getMonth();
@@ -54,12 +62,15 @@ let STATE = {
   currentUser: null,
   alerts: [],
   allUsers: [],
+  tiers: [],
   pricing: null,
+  notifications: [],
   loading: true,
   authMode: 'login',
   tab: 'dashboard',
   adminTab: 'dashboard',
   adminAnalyticsTab: 'overview',
+  selectedTierFilter: 'all', // For filtering charts/KPIs by tier
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -173,20 +184,31 @@ async function init() {
 
 async function loadData() {
   const isAdminOrMgr = STATE.currentUser?.role === 'admin' || STATE.currentUser?.role === 'manager';
-  const [alertsData, usersData, pricingData] = await Promise.all([
+  const isAdmin = STATE.currentUser?.role === 'admin';
+  const [alertsData, usersData, tiersData, notificationsData] = await Promise.all([
     API.get('/api/alerts'),
     isAdminOrMgr ? API.get('/api/users') : Promise.resolve({ users: [] }),
-    API.get('/api/pricing').catch(() => ({ pricing: {} })),
+    API.get('/api/tiers').catch(() => ({ tiers: [] })),
+    isAdmin ? API.get('/api/notifications').catch(() => ({ notifications: [] })) : Promise.resolve({ notifications: [] }),
   ]);
-  STATE.alerts   = alertsData.alerts  || [];
-  STATE.allUsers = usersData.users    || [];
-  // Merge DB pricing into TIERS if available
-  const p = pricingData.pricing || {};
-  if (p.price_trader) TIERS.trader.price = parseFloat(p.price_trader);
-  if (p.price_elite)  TIERS.elite.price  = parseFloat(p.price_elite);
-  if (p.name_trader)  TIERS.trader.label = p.name_trader;
-  if (p.name_elite)   TIERS.elite.label  = p.name_elite;
-  STATE.pricing = p;
+  STATE.alerts = alertsData.alerts || [];
+  STATE.allUsers = usersData.users || [];
+  STATE.notifications = notificationsData.notifications || [];
+  
+  // Update TIERS from database
+  const dbTiers = tiersData.tiers || [];
+  dbTiers.forEach(t => {
+    TIERS[t.id] = {
+      id: t.id,
+      label: t.name,
+      price: parseInt(t.price),
+      color: t.color,
+      bg: TIERS[t.id]?.bg || 'rgba(200,200,200,0.45)',
+      order: t.display_order,
+      visible: !!t.visible,
+    };
+  });
+  STATE.tiers = dbTiers;
 }
 
 // ─── AUTH PAGE ────────────────────────────────────────────────────────────────
@@ -367,11 +389,16 @@ function getUnreadAlerts() {
   return STATE.alerts.filter(a => !seen.has(a.id) && canSeeAlert(u.tier, a.tier) && a.status === 'active');
 }
 
-function getVisibleAlerts() {
+function getVisibleAlerts(tierFilter = null) {
   const u = STATE.currentUser;
   if (!u) return [];
   const locked = isLocked(u);
-  const pool = u.tier ? STATE.alerts.filter(a => canSeeAlert(u.tier, a.tier)) : STATE.alerts;
+  // Filter by user's tier access
+  let pool = u.tier ? STATE.alerts.filter(a => canSeeAlert(u.tier, a.tiers)) : STATE.alerts;
+  // Apply additional tier filter if specified (for charts/KPIs)
+  if (tierFilter && tierFilter !== 'all') {
+    pool = pool.filter(a => a.tiers && a.tiers.includes(tierFilter));
+  }
   const byDate = (arr) => [...arr].sort((a,b) => new Date(b.created) - new Date(a.created));
   return locked ? byDate(pool.filter(a => a.status !== 'active')) : byDate(pool);
 }
@@ -822,12 +849,22 @@ function renderSubscriberTimeline() {
 
 // ─── Gantt Chart ──────────────────────────────────────────────────────────────
 function renderGantt(alerts) {
-  if (!alerts.length) return `<p style="font-size:13px;color:rgba(90,45,25,0.65);text-align:center;padding:40px 0;">No trades to display</p>`;
+  const tierFilter = STATE.selectedTierFilter || 'all';
+  // Filter alerts by selected tier
+  const filteredAlerts = tierFilter === 'all' 
+    ? alerts 
+    : alerts.filter(a => a.tiers && a.tiers.includes(tierFilter));
+    
+  if (!filteredAlerts.length) {
+    return `<p style="font-size:13px;color:rgba(90,45,25,0.65);text-align:center;padding:40px 0;">
+      No ${tierFilter !== 'all' ? TIERS[tierFilter]?.label + ' tier ' : ''}trades to display
+    </p>`;
+  }
 
   const barColor = (a) => a.status === 'active' ? '#1A6FAD' : a.status === 'closed' ? '#1A7A50' : '#C0302A';
 
   // Only show months from earliest alert to today
-  const allMonths = alerts.map(a => getMonthIdx(a.buyDate) ?? 0);
+  const allMonths = filteredAlerts.map(a => getMonthIdx(a.buyDate) ?? 0);
   const minMonth = Math.min(...allMonths, TODAY_MONTH);
   const maxMonth = TODAY_MONTH;
   const visibleMonths = MONTHS.slice(minMonth, maxMonth + 1);
@@ -835,18 +872,18 @@ function renderGantt(alerts) {
 
   return `
 <div style="overflow-x:auto;">
-  <div style="min-width:560px;">
+  <div style="min-width:600px;">
     <!-- Month header row -->
-    <div style="display:grid;grid-template-columns:90px repeat(${totalCols},1fr);margin-bottom:10px;gap:2px;align-items:end;">
-      <div style="font-size:9px;color:rgba(90,45,25,0.45);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;padding-bottom:6px;">Ticker</div>
+    <div style="display:grid;grid-template-columns:120px repeat(${totalCols},1fr);margin-bottom:10px;gap:3px;align-items:end;">
+      <div style="font-size:10px;color:rgba(90,45,25,0.45);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;padding-bottom:6px;">Ticker · Entry</div>
       ${visibleMonths.map((m, i) => {
         const mIdx = i + minMonth;
         const isCur = mIdx === TODAY_MONTH;
-        return `<div style="font-size:10px;color:${isCur?'#E8663A':'#9B8570'};text-align:center;font-weight:${isCur?800:500};letter-spacing:0.04em;padding-bottom:6px;border-bottom:2px solid ${isCur?'#E8663A':'rgba(220,160,130,0.22)'};">${m}${isCur?'▼':''}</div>`;
+        return `<div style="font-size:11px;color:${isCur?'#E8663A':'#9B8570'};text-align:center;font-weight:${isCur?800:600};letter-spacing:0.04em;padding-bottom:6px;border-bottom:2px solid ${isCur?'#E8663A':'rgba(220,160,130,0.22)'};">${m}${isCur?' ▼':''}</div>`;
       }).join('')}
     </div>
-    <!-- Alert rows -->
-    ${alerts.map(a => {
+    <!-- Alert rows with hover tooltips -->
+    ${filteredAlerts.map(a => {
       const buyM   = getMonthIdx(a.buyDate) ?? 0;
       const rawEnd = a.status === 'active' ? TODAY_MONTH : (a.closeDate ? getMonthIdx(a.closeDate) : TODAY_MONTH);
       const endM   = Math.min(rawEnd, TODAY_MONTH);
@@ -854,40 +891,148 @@ function renderGantt(alerts) {
       const leftCols   = clampedBuy - minMonth;
       const spanCols   = Math.max(endM - clampedBuy + 1, 1);
       const days = daysToClose(a.buyDate, a.closeDate);
-      const pnlStr = a.pnl && a.pnl !== '0%' ? ' · ' + a.pnl : '';
+      const pnlStr = a.pnl && a.pnl !== '0%' ? a.pnl : '';
+      const tierLabels = (a.tiers || [a.tier]).map(tid => TIERS[tid]?.label || tid).join(', ');
+      
+      // Tooltip content
+      const tooltipText = `${a.ticker} · ${a.title} | ${tierLabels} | Entry: $${a.entry} | Target: $${a.t1} | Stop: $${a.sl} | ${days}d | ${pnlStr || 'Active'}`;
+      
       return `
-<div style="display:grid;grid-template-columns:90px repeat(${totalCols},1fr);margin-bottom:8px;gap:2px;align-items:center;">
-  <div style="display:flex;flex-direction:column;padding-right:6px;">
-    <span style="font-size:12px;font-weight:800;color:#2C1810;letter-spacing:-0.2px;">${a.ticker}</span>
-    <span style="font-size:9px;color:#9B8570;">${a.entry ? '$'+a.entry : ''}</span>
+<div style="display:grid;grid-template-columns:120px repeat(${totalCols},1fr);margin-bottom:10px;gap:3px;align-items:center;">
+  <div style="display:flex;flex-direction:column;padding-right:8px;">
+    <span style="font-size:13px;font-weight:800;color:#2C1810;letter-spacing:-0.3px;">${a.ticker}</span>
+    <span style="font-size:10px;color:#9B8570;font-weight:600;">${a.entry ? '$'+a.entry : '—'}</span>
   </div>
   ${Array.from({length:totalCols}).map((_,ci) => {
     const inBar  = ci >= leftCols && ci < leftCols + spanCols;
     const isFirst= ci === leftCols;
     const isLast = ci === leftCols + spanCols - 1;
-    if (!inBar) return `<div style="height:30px;background:rgba(220,160,130,0.10);border-radius:4px;"></div>`;
-    const rLeft  = isFirst ? '10px 0 0 10px' : '0';
-    const rRight = isLast  ? '0 10px 10px 0' : '0';
-    return `<div style="height:30px;background:${barColor(a)};border-radius:${isFirst?'10px 0 0 10px':'0'} ${isLast?'10px 10px':'0 0'} ${isFirst&&isLast?'10px':'0'};display:flex;align-items:center;padding:0 7px;overflow:hidden;justify-content:${isFirst?'flex-start':'flex-end'};">
-      ${isFirst && spanCols > 1 ? `<span style="font-size:9px;color:#fff;font-weight:700;white-space:nowrap;opacity:0.95;">${days ? days+'d' : ''}</span>` : ''}
-      ${isLast && a.status !== 'active' && pnlStr ? `<span style="font-size:9px;color:rgba(255,255,255,0.92);white-space:nowrap;font-weight:700;">${pnlStr}</span>` : ''}
+    if (!inBar) return `<div style="height:36px;background:rgba(220,160,130,0.08);border-radius:6px;"></div>`;
+    
+    return `<div title="${tooltipText}" onclick="openAlertDetailModal(${a.id})" style="height:36px;background:${barColor(a)};border-radius:${isFirst?'12px 0 0 12px':'0'} ${isLast?'0 12px 12px 0':'0'};display:flex;align-items:center;padding:0 8px;overflow:hidden;justify-content:${isFirst?'flex-start':isLast?'flex-end':'center'};cursor:pointer;transition:opacity 0.2s;box-shadow:0 2px 8px rgba(0,0,0,0.12);" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+      ${isFirst && spanCols > 2 ? `<span style="font-size:10px;color:#fff;font-weight:800;white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,0.25);">${days ? days+'d' : ''}</span>` : ''}
+      ${isLast && a.status !== 'active' && pnlStr ? `<span style="font-size:10px;color:#fff;white-space:nowrap;font-weight:800;text-shadow:0 1px 3px rgba(0,0,0,0.25);">${pnlStr}</span>` : ''}
     </div>`;
   }).join('')}
 </div>`;
     }).join('')}
     <!-- Legend -->
-    <div style="display:flex;gap:18px;margin-top:16px;padding-top:12px;border-top:1px solid rgba(220,160,130,0.22);flex-wrap:wrap;align-items:center;">
-      ${[['#1A6FAD','Active'],['#1A7A50','Closed (profit)'],['#C0302A','Stop Loss']].map(([c,l]) =>
-        `<div style="display:flex;align-items:center;gap:7px;font-size:11px;color:#9B8570;">
-          <div style="width:24px;height:10px;background:${c};border-radius:5px;"></div>${l}
+    <div style="display:flex;gap:20px;margin-top:18px;padding-top:14px;border-top:1px solid rgba(220,160,130,0.25);flex-wrap:wrap;align-items:center;">
+      ${[['#1A6FAD','Active'],['#1A7A50','Closed'],['#C0302A','Stop Loss']].map(([c,l]) =>
+        `<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#7A6958;font-weight:600;">
+          <div style="width:28px;height:12px;background:${c};border-radius:6px;box-shadow:0 2px 6px ${c}55;"></div>${l}
         </div>`).join('')}
-      <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#E8663A;font-weight:700;">
-        ▼ Today (${MONTHS[TODAY_MONTH]})
+      <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#E8663A;font-weight:800;margin-left:auto;">
+        ▼ Today · ${MONTHS[TODAY_MONTH]} 2026
       </div>
     </div>
   </div>
 </div>`;
 }
+
+
+// ─── Alert Detail Modal ──────────────────────────────────────────────────────
+function openAlertDetailModal(alertId) {
+  const alert = STATE.alerts.find(a => a.id === alertId);
+  if (!alert) return;
+  
+  const tierLabels = (alert.tiers || [alert.tier]).map(tid => {
+    const t = TIERS[tid];
+    return t ? `<span style="background:${t.bg};color:${t.color};font-size:10px;font-weight:800;text-transform:uppercase;padding:5px 11px;border-radius:6px;letter-spacing:0.10em;">${t.label}</span>` : '';
+  }).join(' ');
+  
+  const days = daysToClose(alert.buyDate, alert.closeDate);
+  const statusColor = alert.status === 'active' ? C.activeText : alert.status === 'closed' ? C.closedText : C.stoppedText;
+  const statusBg = alert.status === 'active' ? C.activeBg : alert.status === 'closed' ? C.closedBg : C.stoppedBg;
+  const pnlNum = parseFloat(alert.pnl);
+  const pnlColor = pnlNum >= 0 ? '#1A7A50' : '#C0302A';
+  
+  const modal = `
+    <div id="alertDetailModal" onclick="if(event.target.id==='alertDetailModal')closeAlertDetailModal()" 
+         style="position:fixed;inset:0;background:rgba(44,24,16,0.75);backdrop-filter:blur(6px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;animation:fadeIn 0.2s;">
+      <div onclick="event.stopPropagation()" style="${cardStyle}max-width:680px;width:100%;max-height:90vh;overflow-y:auto;position:relative;animation:slideUp 0.3s;">
+        <button onclick="closeAlertDetailModal()" style="position:absolute;top:20px;right:20px;background:rgba(200,195,188,0.30);border:none;width:32px;height:32px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.2s;font-size:18px;color:#5A2D19;" onmouseover="this.style.background='rgba(200,195,188,0.50)'" onmouseout="this.style.background='rgba(200,195,188,0.30)'">×</button>
+        
+        <!-- Header -->
+        <div style="margin-bottom:20px;">
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;">
+            <h2 style="font-size:26px;font-weight:900;color:#2C1810;margin:0;letter-spacing:-0.6px;">${alert.ticker}</h2>
+            ${tierLabels}
+          </div>
+          <h3 style="font-size:18px;font-weight:600;color:#5A2D19;margin:0 0 10px 0;">${alert.title}</h3>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <span style="background:${statusBg};color:${statusColor};font-size:11px;font-weight:800;text-transform:uppercase;padding:5px 12px;border-radius:6px;letter-spacing:0.08em;">${alert.status}</span>
+            <span style="background:${C.chipBg};color:${C.chipText};font-size:11px;font-weight:800;text-transform:uppercase;padding:5px 12px;border-radius:6px;letter-spacing:0.08em;">${alert.category}</span>
+            <span style="background:rgba(200,195,188,0.35);color:#5A2D19;font-size:11px;font-weight:700;padding:5px 12px;border-radius:6px;">${alert.priority} priority</span>
+          </div>
+        </div>
+        
+        <!-- Description -->
+        ${alert.description ? `
+        <div style="background:rgba(248,245,242,0.60);border-radius:12px;padding:16px;margin-bottom:20px;">
+          <p style="font-size:14px;color:#2C1810;line-height:1.6;margin:0;">${alert.description}</p>
+        </div>` : ''}
+        
+        <!-- Trade Details Grid -->
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:20px;">
+          <div style="background:linear-gradient(135deg,#1A7A50 0%,#15995C 100%);border-radius:14px;padding:18px;color:#fff;box-shadow:0 4px 16px rgba(26,122,80,0.25);">
+            <div style="font-size:11px;font-weight:800;text-transform:uppercase;opacity:0.75;letter-spacing:0.10em;margin-bottom:6px;">Entry Price</div>
+            <div style="font-size:28px;font-weight:900;letter-spacing:-0.6px;">$${alert.entry}</div>
+          </div>
+          <div style="background:linear-gradient(135deg,#1A6FAD 0%,#2A8FCD 100%);border-radius:14px;padding:18px;color:#fff;box-shadow:0 4px 16px rgba(26,111,173,0.25);">
+            <div style="font-size:11px;font-weight:800;text-transform:uppercase;opacity:0.75;letter-spacing:0.10em;margin-bottom:6px;">Target (T1)</div>
+            <div style="font-size:28px;font-weight:900;letter-spacing:-0.6px;">$${alert.t1}</div>
+          </div>
+          <div style="background:linear-gradient(135deg,#C0302A 0%,#E04030 100%);border-radius:14px;padding:18px;color:#fff;box-shadow:0 4px 16px rgba(192,48,42,0.25);">
+            <div style="font-size:11px;font-weight:800;text-transform:uppercase;opacity:0.75;letter-spacing:0.10em;margin-bottom:6px;">Stop Loss</div>
+            <div style="font-size:28px;font-weight:900;letter-spacing:-0.6px;">$${alert.sl}</div>
+          </div>
+          <div style="background:${pnlNum >= 0 ? 'linear-gradient(135deg,#1A7A50 0%,#15995C 100%)' : 'linear-gradient(135deg,#C0302A 0%,#E04030 100%)'};border-radius:14px;padding:18px;color:#fff;box-shadow:0 4px 16px ${pnlColor}40;">
+            <div style="font-size:11px;font-weight:800;text-transform:uppercase;opacity:0.75;letter-spacing:0.10em;margin-bottom:6px;">P&L</div>
+            <div style="font-size:28px;font-weight:900;letter-spacing:-0.6px;">${alert.pnl}</div>
+          </div>
+        </div>
+        
+        <!-- Timeline Info -->
+        <div style="background:rgba(248,245,242,0.60);border-radius:12px;padding:16px;">
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px;">
+            <div>
+              <div style="font-size:11px;font-weight:700;color:rgba(90,45,25,0.60);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Buy Date</div>
+              <div style="font-size:14px;font-weight:700;color:#2C1810;">${fmtDate(alert.buyDate)}</div>
+            </div>
+            ${alert.closeDate ? `
+            <div>
+              <div style="font-size:11px;font-weight:700;color:rgba(90,45,25,0.60);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Close Date</div>
+              <div style="font-size:14px;font-weight:700;color:#2C1810;">${fmtDate(alert.closeDate)}</div>
+            </div>` : ''}
+            ${days ? `
+            <div>
+              <div style="font-size:11px;font-weight:700;color:rgba(90,45,25,0.60);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Duration</div>
+              <div style="font-size:14px;font-weight:700;color:#2C1810;">${days} days</div>
+            </div>` : ''}
+            <div>
+              <div style="font-size:11px;font-weight:700;color:rgba(90,45,25,0.60);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Views</div>
+              <div style="font-size:14px;font-weight:700;color:#2C1810;">${alert.views || 0}</div>
+            </div>
+          </div>
+        </div>
+        
+        ${alert.updatedAt && alert.updatedAt !== alert.created ? `
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(200,195,188,0.35);font-size:11px;color:rgba(90,45,25,0.60);text-align:center;">
+          Updated on ${fmtDate(alert.updatedAt)}
+        </div>` : ''}
+      </div>
+    </div>
+  `;
+  
+  document.body.insertAdjacentHTML('beforeend', modal);
+}
+
+function closeAlertDetailModal() {
+  const modal = document.getElementById('alertDetailModal');
+  if (modal) modal.remove();
+}
+
 
 // ─── Account Tab ──────────────────────────────────────────────────────────────
 function renderAccountTab() {
@@ -1512,6 +1657,101 @@ function renderAdminAnalytics() {
 }
 
 function setAnalyticsTab(t) { STATE.adminAnalyticsTab = t; render(); }
+
+
+function renderTierManagement() {
+  const tiers = Object.values(TIERS).sort((a, b) => a.order - b.order);
+  const unreadNotifications = STATE.notifications.filter(n => !n.read);
+  
+  return `
+    <div style="${cardStyle}padding:24px;">
+      <h3 style="font-size:18px;font-weight:700;color:#2C1810;margin:0 0 16px 0;">Tier Management</h3>
+      <p style="font-size:13px;color:rgba(90,45,25,0.70);margin:0 0 20px 0;">
+        Control which tiers are visible to subscribers. Hidden tiers won't appear in signup/upgrade options.
+      </p>
+      
+      <table style="${tableStyle}">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:10px;border-bottom:1.5px solid rgba(200,195,188,0.50);">Tier</th>
+            <th style="text-align:right;padding:10px;border-bottom:1.5px solid rgba(200,195,188,0.50);">Price/mo</th>
+            <th style="text-align:center;padding:10px;border-bottom:1.5px solid rgba(200,195,188,0.50);">Visible to Subscribers</th>
+            <th style="text-align:right;padding:10px;border-bottom:1.5px solid rgba(200,195,188,0.50);">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tiers.map(t => `
+            <tr>
+              <td style="padding:10px;border-bottom:1px solid rgba(200,195,188,0.25);">
+                <span style="font-weight:600;color:${t.color};">${t.label}</span>
+              </td>
+              <td style="padding:10px;border-bottom:1px solid rgba(200,195,188,0.25);text-align:right;">
+                $${t.price.toLocaleString()}
+              </td>
+              <td style="padding:10px;border-bottom:1px solid rgba(200,195,188,0.25);text-align:center;">
+                <span style="${badgeStyle(t.visible ? 'green' : 'gray')}">${t.visible ? 'Visible' : 'Hidden'}</span>
+              </td>
+              <td style="padding:10px;border-bottom:1px solid rgba(200,195,188,0.25);text-align:right;">
+                <button onclick="toggleTierVisibility('${t.id}', ${!t.visible})" style="${btnStyle('secondary')}font-size:12px;padding:6px 14px;">
+                  ${t.visible ? 'Hide' : 'Show'}
+                </button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+    
+    ${unreadNotifications.length > 0 ? `
+    <div style="${cardStyle}padding:24px;margin-top:20px;">
+      <h3 style="font-size:18px;font-weight:700;color:#2C1810;margin:0 0 16px 0;">
+        New Notifications 
+        <span style="background:#E8663A;color:#fff;font-size:13px;font-weight:800;padding:3px 10px;border-radius:12px;margin-left:10px;">
+          ${unreadNotifications.length}
+        </span>
+      </h3>
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        ${unreadNotifications.map(n => `
+          <div style="${glass}border-radius:12px;padding:16px;border-left:3px solid ${n.type.includes('prime') ? '#8B6914' : '#1A1A2E'};">
+            <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
+              <span style="font-size:11px;font-weight:800;text-transform:uppercase;color:${n.type.includes('prime') ? '#8B6914' : '#1A1A2E'};letter-spacing:0.10em;">
+                ${n.type.replace('signup_', '').toUpperCase()} SIGNUP
+              </span>
+              <button onclick="markNotificationRead(${n.id})" style="border:none;background:none;color:#9A9189;cursor:pointer;font-size:12px;">
+                Mark Read
+              </button>
+            </div>
+            <p style="font-size:13px;color:#2C1810;margin:0;">${n.message}</p>
+            <span style="font-size:11px;color:rgba(90,45,25,0.60);margin-top:6px;display:block;">
+              ${new Date(n.created_at).toLocaleString()}
+            </span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+    ` : ''}
+  `;
+}
+
+async function toggleTierVisibility(tierId, visible) {
+  try {
+    await API.put(\`/api/tiers/\${tierId}\`, { visible });
+    await loadData();
+    render();
+  } catch (e) {
+    alert('Failed to update tier visibility: ' + e.message);
+  }
+}
+
+async function markNotificationRead(notificationId) {
+  try {
+    await API.put(\`/api/notifications/\${notificationId}\`, {});
+    await loadData();
+    render();
+  } catch (e) {
+    console.error('Failed to mark notification as read:', e);
+  }
+}
 
 function renderPricingManagement() {
   return `

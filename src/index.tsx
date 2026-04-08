@@ -87,17 +87,29 @@ app.post('/api/users', async (c) => {
   const token = c.req.header('Authorization')?.replace('Bearer ', '')
   const me = await getUser(c.env.DB, token || '') as any
   if (!me || !isAdminOrManager(me)) return c.json({ error: 'Forbidden' }, 403)
-  const { name, email, password, tier, subscriptionStatus, role } = await c.req.json()
+  const { name, email, password, tier, subscriptionStatus, role, phone } = await c.req.json()
   if (!name || !email) return c.json({ error: 'Name and email required.' }, 400)
+  // Require phone for prime and exclusive tiers
+  if ((tier === 'prime' || tier === 'exclusive') && !phone) {
+    return c.json({ error: `Phone number required for ${tier} tier.` }, 400)
+  }
   // Only admin can create managers
   const assignedRole = (role === 'manager' && isAdmin(me)) ? 'manager' : 'subscriber'
   const exists = await c.env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first()
   if (exists) return c.json({ error: 'Email already exists.' }, 409)
   const joined = new Date().toISOString().split('T')[0]
   const result = await c.env.DB.prepare(
-    'INSERT INTO users (name, email, password, role, tier, subscription_status, joined) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).bind(name, email, password || 'pass123', assignedRole, tier || null, subscriptionStatus || 'active', joined).run()
+    'INSERT INTO users (name, email, password, role, tier, subscription_status, joined, phone) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).bind(name, email, password || 'pass123', assignedRole, tier || null, subscriptionStatus || 'active', joined, phone || null).run()
   const user = await c.env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(result.meta.last_row_id).first() as any
+  
+  // Create notification for admin if prime/exclusive signup
+  if (tier === 'prime' || tier === 'exclusive') {
+    await c.env.DB.prepare(
+      'INSERT INTO notifications (type, user_id, message) VALUES (?, ?, ?)'
+    ).bind(`signup_${tier}`, user.id, `New ${tier} member: ${name} (${email}, ${phone})`).run()
+  }
+  
   return c.json({ user: formatUser(user) })
 })
 
@@ -118,12 +130,18 @@ app.put('/api/users/:id', async (c) => {
   const watchlist = body.watchlist !== undefined ? JSON.stringify(body.watchlist) : user.watchlist
   const seenAlertIds = body.seenAlertIds !== undefined ? JSON.stringify(body.seenAlertIds) : user.seen_alert_ids
   const notifications = body.notifications !== undefined ? (body.notifications ? 1 : 0) : user.notifications
+  const phone = body.phone !== undefined ? body.phone : user.phone
   // Only admin can change roles
   const role = (body.role !== undefined && isAdmin(me)) ? body.role : user.role
+  
+  // Validate phone for prime/exclusive
+  if ((tier === 'prime' || tier === 'exclusive') && !phone) {
+    return c.json({ error: `Phone number required for ${tier} tier.` }, 400)
+  }
 
   await c.env.DB.prepare(
-    'UPDATE users SET name=?, password=?, tier=?, subscription_status=?, watchlist=?, seen_alert_ids=?, notifications=?, role=? WHERE id=?'
-  ).bind(name, password, tier, subscriptionStatus, watchlist, seenAlertIds, notifications, role, id).run()
+    'UPDATE users SET name=?, password=?, tier=?, subscription_status=?, watchlist=?, seen_alert_ids=?, notifications=?, role=?, phone=? WHERE id=?'
+  ).bind(name, password, tier, subscriptionStatus, watchlist, seenAlertIds, notifications, role, phone, id).run()
   const updated = await c.env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(id).first() as any
   return c.json({ user: formatUser(updated) })
 })
@@ -151,11 +169,13 @@ app.post('/api/alerts', async (c) => {
   const token = c.req.header('Authorization')?.replace('Bearer ', '')
   const me = await getUser(c.env.DB, token || '') as any
   if (!me || !isAdminOrManager(me)) return c.json({ error: 'Forbidden' }, 403)
-  const { ticker, title, description, category, tier, priority, status, entry, t1, sl } = await c.req.json()
+  const { ticker, title, description, category, tiers, priority, status, entry, t1, sl } = await c.req.json()
   const created = new Date().toISOString().split('T')[0]
+  // Convert tiers array to JSON string
+  const tiersJson = JSON.stringify(tiers || ['trader'])
   const result = await c.env.DB.prepare(
-    'INSERT INTO alerts (ticker, title, description, category, tier, priority, status, entry, t1, sl, pnl, views, buy_date, created, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "0%", 0, ?, ?, NULL)'
-  ).bind(ticker, title, description, category, tier, priority, status, entry, t1, sl, created, created).run()
+    'INSERT INTO alerts (ticker, title, description, category, tiers, priority, status, entry, t1, sl, pnl, views, buy_date, created, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "0%", 0, ?, ?, NULL)'
+  ).bind(ticker, title, description, category, tiersJson, priority, status, entry, t1, sl, created, created).run()
   const alert = await c.env.DB.prepare('SELECT * FROM alerts WHERE id = ?').bind(result.meta.last_row_id).first() as any
   return c.json({ alert: formatAlert(alert) })
 })
@@ -172,7 +192,7 @@ app.put('/api/alerts/:id', async (c) => {
   const title = body.title ?? alert.title
   const description = body.description ?? alert.description
   const category = body.category ?? alert.category
-  const tier = body.tier ?? alert.tier
+  const tiers = body.tiers !== undefined ? JSON.stringify(body.tiers) : alert.tiers
   const priority = body.priority ?? alert.priority
   const status = body.status ?? alert.status
   const entry = body.entry ?? alert.entry
@@ -182,8 +202,8 @@ app.put('/api/alerts/:id', async (c) => {
   const closeDate = body.closeDate !== undefined ? body.closeDate : alert.close_date
   const updatedAt = new Date().toISOString().split('T')[0]
   await c.env.DB.prepare(
-    'UPDATE alerts SET ticker=?, title=?, description=?, category=?, tier=?, priority=?, status=?, entry=?, t1=?, sl=?, pnl=?, close_date=?, updated_at=? WHERE id=?'
-  ).bind(ticker, title, description, category, tier, priority, status, entry, t1, sl, pnl, closeDate, updatedAt, id).run()
+    'UPDATE alerts SET ticker=?, title=?, description=?, category=?, tiers=?, priority=?, status=?, entry=?, t1=?, sl=?, pnl=?, close_date=?, updated_at=? WHERE id=?'
+  ).bind(ticker, title, description, category, tiers, priority, status, entry, t1, sl, pnl, closeDate, updatedAt, id).run()
   const updated = await c.env.DB.prepare('SELECT * FROM alerts WHERE id = ?').bind(id).first() as any
   return c.json({ alert: formatAlert(updated) })
 })
@@ -197,13 +217,54 @@ app.delete('/api/alerts/:id', async (c) => {
   return c.json({ ok: true })
 })
 
-// ─── PRICING ─────────────────────────────────────────────────────────────────
+// ─── TIERS ──────────────────────────────────────────────────────────────────
+app.get('/api/tiers', async (c) => {
+  const token = c.req.header('Authorization')?.replace('Bearer ', '')
+  const me = await getUser(c.env.DB, token || '') as any
+  if (!me) return c.json({ error: 'Unauthorized' }, 401)
+  // Subscribers only see visible tiers
+  const query = isAdminOrManager(me) 
+    ? 'SELECT * FROM tiers ORDER BY display_order'
+    : 'SELECT * FROM tiers WHERE visible = 1 ORDER BY display_order'
+  const rows = await c.env.DB.prepare(query).all()
+  return c.json({ tiers: rows.results })
+})
+
+app.put('/api/tiers/:id', async (c) => {
+  const token = c.req.header('Authorization')?.replace('Bearer ', '')
+  const me = await getUser(c.env.DB, token || '') as any
+  if (!me || !isAdmin(me)) return c.json({ error: 'Forbidden' }, 403)
+  const id = c.req.param('id')
+  const { visible } = await c.req.json()
+  await c.env.DB.prepare('UPDATE tiers SET visible = ? WHERE id = ?').bind(visible ? 1 : 0, id).run()
+  return c.json({ ok: true })
+})
+
+// ─── NOTIFICATIONS ──────────────────────────────────────────────────────────
+app.get('/api/notifications', async (c) => {
+  const token = c.req.header('Authorization')?.replace('Bearer ', '')
+  const me = await getUser(c.env.DB, token || '') as any
+  if (!me || !isAdmin(me)) return c.json({ error: 'Forbidden' }, 403)
+  const rows = await c.env.DB.prepare('SELECT * FROM notifications ORDER BY created_at DESC LIMIT 50').all()
+  return c.json({ notifications: rows.results })
+})
+
+app.put('/api/notifications/:id', async (c) => {
+  const token = c.req.header('Authorization')?.replace('Bearer ', '')
+  const me = await getUser(c.env.DB, token || '') as any
+  if (!me || !isAdmin(me)) return c.json({ error: 'Forbidden' }, 403)
+  const id = parseInt(c.req.param('id'))
+  await c.env.DB.prepare('UPDATE notifications SET read = 1 WHERE id = ?').bind(id).run()
+  return c.json({ ok: true })
+})
+
+// ─── PRICING (Legacy support) ───────────────────────────────────────────────
 app.get('/api/pricing', async (c) => {
   const token = c.req.header('Authorization')?.replace('Bearer ', '')
   const me = await getUser(c.env.DB, token || '') as any
   if (!me) return c.json({ error: 'Unauthorized' }, 401)
   // Return pricing from settings table
-  const rows = await c.env.DB.prepare("SELECT * FROM settings WHERE key IN ('price_trader','price_elite','name_trader','name_elite','desc_trader','desc_elite')").all()
+  const rows = await c.env.DB.prepare("SELECT * FROM settings WHERE key LIKE 'price_%' OR key LIKE 'name_%' OR key LIKE 'desc_%'").all()
   const result: any = {}
   rows.results.forEach((r: any) => { result[r.key] = r.value })
   return c.json({ pricing: result })
@@ -233,6 +294,7 @@ function formatUser(u: any) {
     tier: u.tier,
     subscriptionStatus: u.subscription_status,
     joined: u.joined,
+    phone: u.phone,
     notifications: !!u.notifications,
     watchlist: parseJSON(u.watchlist, []),
     seenAlertIds: parseJSON(u.seen_alert_ids, []),
@@ -246,7 +308,8 @@ function formatAlert(a: any) {
     title: a.title,
     description: a.description,
     category: a.category,
-    tier: a.tier,
+    tiers: parseJSON(a.tiers, ['trader']),
+    tier: parseJSON(a.tiers, ['trader'])[0], // Legacy support: return first tier
     priority: a.priority,
     status: a.status,
     entry: a.entry,
